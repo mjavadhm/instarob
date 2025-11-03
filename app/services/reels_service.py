@@ -7,7 +7,7 @@ import asyncio
 import cv2
 import shutil
 from pathlib import Path
-from typing import Dict, Any
+from typing import Dict, Any, List
 from urllib.parse import urlparse
 import google.generativeai as genai
 
@@ -151,14 +151,25 @@ class ReelsService:
                 logger.info(f"Deleting uploaded file '{video_file.display_name}' from Gemini in a separate thread.")
                 await asyncio.to_thread(genai.delete_file, video_file.name)
 
-    def zip_frames(self, request_id: str) -> Path:
-        """Zips the frames for a given request ID."""
-        request_frame_dir = self.frames_dir / request_id
-        if not request_frame_dir.is_dir():
-            raise FileNotFoundError("Frames for the given request ID not found.")
+    def zip_frames(self, request_ids: List[str], zip_filename: str) -> Path:
+        """Zips the frames for a given list of request IDs."""
 
-        zip_path_base = self.temp_dir / f"frames_{request_id}"
-        zip_path = shutil.make_archive(str(zip_path_base), 'zip', str(request_frame_dir))
+        batch_dir = self.temp_dir / zip_filename
+        batch_dir.mkdir(exist_ok=True)
+
+        for request_id in request_ids:
+            source_dir = self.frames_dir / request_id
+            if source_dir.is_dir():
+                # Copy the entire directory to the batch folder
+                shutil.copytree(source_dir, batch_dir / request_id)
+            else:
+                logger.warning(f"Directory for request_id {request_id} not found, skipping.")
+
+        zip_path_base = self.temp_dir / zip_filename
+        zip_path = shutil.make_archive(str(zip_path_base), 'zip', str(batch_dir))
+
+        # Clean up the temporary batch directory
+        shutil.rmtree(batch_dir)
 
         return Path(zip_path)
 
