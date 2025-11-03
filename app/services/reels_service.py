@@ -4,6 +4,8 @@ import json
 import os
 import aiofiles
 import asyncio
+import cv2
+import shutil
 from pathlib import Path
 from typing import Dict, Any
 from urllib.parse import urlparse
@@ -35,6 +37,10 @@ class ReelsService:
         self.temp_dir = Path("/tmp/reels_videos")
         self.temp_dir.mkdir(parents=True, exist_ok=True)
 
+        # Create a directory for storing frames
+        self.frames_dir = Path("frames")
+        self.frames_dir.mkdir(parents=True, exist_ok=True)
+
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
 
     async def _download_video(self, url: str) -> Path:
@@ -60,6 +66,34 @@ class ReelsService:
             except httpx.RequestError as e:
                 logger.error(f"Network error while downloading video: {e}")
                 raise
+
+    def _extract_and_save_frames(self, video_path: Path, analysis: FrameAnalysis, request_id: str):
+        """Extracts frames from a video at given timestamps and saves them."""
+
+        request_frame_dir = self.frames_dir / request_id
+        request_frame_dir.mkdir(parents=True, exist_ok=True)
+
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            logger.error(f"Could not open video file: {video_path}")
+            return
+
+        for frame_info in analysis.best_frames:
+            timestamp_ms = frame_info.timestamp_seconds * 1000
+            cap.set(cv2.CAP_PROP_POS_MSEC, timestamp_ms)
+
+            ret, frame = cap.read()
+            if ret:
+                sanitized_product_name = "".join(c for c in analysis.product_category if c.isalnum() or c in ('_', '-')).rstrip()
+                frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+                frame_path = request_frame_dir / frame_filename
+
+                cv2.imwrite(str(frame_path), frame)
+                logger.info(f"Saved frame at {frame_info.timestamp_seconds}s to {frame_path}")
+            else:
+                logger.warning(f"Could not read frame at {frame_info.timestamp_seconds}s")
+
+        cap.release()
 
     async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
         """
@@ -95,19 +129,37 @@ class ReelsService:
             analysis_data = json.loads(response_text)
 
             # 4. Validate with Pydantic model
-            return FrameAnalysis(**analysis_data)
+            analysis_result = FrameAnalysis(**analysis_data)
+
+            # 5. Extract and save frames
+            await asyncio.to_thread(
+                self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id
+            )
+
+            return analysis_result
 
         except Exception as e:
             logger.error(f"An error occurred during video analysis: {e}", exc_info=True)
             raise RuntimeError("Failed to process and analyze the video.")
 
         finally:
-            # 5. Clean up the downloaded file and the uploaded file on Gemini
+            # 6. Clean up the downloaded file and the uploaded file on Gemini
             if video_path and os.path.exists(video_path):
                 await asyncio.to_thread(os.remove, video_path)
                 logger.info(f"Cleaned up temporary local file: {video_path}")
             if video_file:
                 logger.info(f"Deleting uploaded file '{video_file.display_name}' from Gemini in a separate thread.")
                 await asyncio.to_thread(genai.delete_file, video_file.name)
+
+    def zip_frames(self, request_id: str) -> Path:
+        """Zips the frames for a given request ID."""
+        request_frame_dir = self.frames_dir / request_id
+        if not request_frame_dir.is_dir():
+            raise FileNotFoundError("Frames for the given request ID not found.")
+
+        zip_path_base = self.temp_dir / f"frames_{request_id}"
+        zip_path = shutil.make_archive(str(zip_path_base), 'zip', str(request_frame_dir))
+
+        return Path(zip_path)
 
 reels_service = ReelsService()

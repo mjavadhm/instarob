@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, HttpUrl
-from typing import Optional
+import uuid
 
 class ReelIn(BaseModel):
     caption: str = Field(..., min_length=1, max_length=2200)
     reel_url: HttpUrl
-    request_id: Optional[str] = None
+    request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
