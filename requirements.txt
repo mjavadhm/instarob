@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+loguru
+pydantic
+pydantic-settings
+python-dotenv
+aioredis
+asyncpg
+httpx
