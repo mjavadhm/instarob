@@ -50,10 +50,14 @@ class ReelsService:
         file_name = "".join(c for c in file_name if c.isalnum() or c in ('.', '_', '-'))
         local_path = self.temp_dir / file_name
 
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+
         logger.info(f"Starting video download from {url} to {local_path}...")
         async with httpx.AsyncClient() as client:
             try:
-                async with client.stream("GET", url, follow_redirects=True, timeout=60.0) as response:
+                async with client.stream("GET", url, headers=headers, follow_redirects=True, timeout=60.0) as response:
                     response.raise_for_status()
                     async with aiofiles.open(local_path, "wb") as f:
                         async for chunk in response.aiter_bytes():
