@@ -7,3 +7,5 @@ python-dotenv
 aioredis
 asyncpg
 httpx
+google-generativeai
+PyYAML

@@ -1,0 +1,4 @@
+product_search:
+  model: gemini-2.5-flash
+  prompt_file: "prompts/product_search.txt"
+  temperature: 0.3
