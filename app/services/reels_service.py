@@ -6,6 +6,7 @@ import aiofiles
 import asyncio
 import cv2
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, Any, List
 from urllib.parse import urlparse
@@ -120,6 +121,20 @@ class ReelsService:
                 genai.upload_file, path=video_path, display_name=video_path.name
             )
             logger.info(f"Completed upload for file '{video_file.display_name}' (URI: {video_file.uri})")
+
+            # Wait for the file to be processed
+            logger.info(f"Waiting for file '{video_file.display_name}' to be processed...")
+            start_time = time.time()
+            while video_file.state.name == "PROCESSING":
+                if time.time() - start_time > 60: # 60-second timeout
+                    raise TimeoutError("File processing timed out.")
+                await asyncio.sleep(2)
+                video_file = await asyncio.to_thread(genai.get_file, video_file.name)
+
+            if video_file.state.name == "FAILED":
+                raise RuntimeError("File processing failed on the server.")
+
+            logger.info(f"File '{video_file.display_name}' is now in state: {video_file.state.name}")
 
             model_name = self.llm_config.get("model", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
