@@ -43,11 +43,16 @@ class ReelsService:
 
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
 
-    async def _download_video(self, url: str) -> Path:
+    async def _download_video(self, url: str, request_id: str) -> Path:
         """Asynchronously downloads a video from a URL to a temporary local file."""
-        file_name = os.path.basename(urlparse(url).path)
-        # Sanitize file name to prevent directory traversal or other issues
-        file_name = "".join(c for c in file_name if c.isalnum() or c in ('.', '_', '-'))
+
+        # Try to get a file extension from the URL path
+        path = urlparse(url).path
+        ext = os.path.splitext(path)[1]
+        if not ext:
+            ext = ".mp4"  # Default to .mp4 if no extension is found
+
+        file_name = f"{request_id}{ext}"
         local_path = self.temp_dir / file_name
 
         headers = {
@@ -107,7 +112,7 @@ class ReelsService:
         video_file = None
         try:
             # 1. Download the video
-            video_path = await self._download_video(str(reel_in.reel_url))
+            video_path = await self._download_video(str(reel_in.reel_url), reel_in.request_id)
 
             # 2. Upload video to Gemini and analyze (using asyncio.to_thread for blocking calls)
             logger.info(f"Uploading '{video_path.name}' to Gemini File API in a separate thread...")
