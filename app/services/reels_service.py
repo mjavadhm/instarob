@@ -84,7 +84,7 @@ class ReelsService:
 
             ret, frame = cap.read()
             if ret:
-                sanitized_product_name = "".join(c for c in analysis.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+                sanitized_product_name = "".join(c for c in analysis.product_category if c.isalnum() or c in ('_', '-')).rstrip()
                 frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
                 frame_path = request_frame_dir / frame_filename
 
@@ -103,7 +103,7 @@ class ReelsService:
         video_file = None
         try:
             # 1. Download the video
-            video_path = await self._download_video(reel_in.reel_url)
+            video_path = await self._download_video(str(reel_in.reel_url))
 
             # 2. Upload video to Gemini and analyze (using asyncio.to_thread for blocking calls)
             logger.info(f"Uploading '{video_path.name}' to Gemini File API in a separate thread...")

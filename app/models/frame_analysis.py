@@ -15,5 +15,5 @@ class Frame(BaseModel):
 
 class FrameAnalysis(BaseModel):
     file_name: str
-    identified_product: str
+    product_category: str
     best_frames: List[Frame]
