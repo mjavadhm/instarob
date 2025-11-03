@@ -16,7 +16,8 @@ def setup_logging():
         backtrace=True,
         level="INFO",
     )
-    logger.configure(extra={"request_id": request_id_var})
+    # Use a lambda to ensure the value is retrieved at log time, making it pickleable.
+    logger.configure(patcher=lambda record: record["extra"].update(request_id=request_id_var.get()))
 
 def get_logger():
     return logger

@@ -1,19 +1,11 @@
-from pydantic import BaseModel, Field
-from typing import List, Dict
+from pydantic import BaseModel
+from typing import List
 
-class BoundingBox(BaseModel):
-    x_min: int
-    y_min: int
-    x_max: int
-    y_max: int
-
-class Frame(BaseModel):
+class BestFrame(BaseModel):
     rank: int
     timestamp_seconds: float
     description: str
-    bounding_box_percent: BoundingBox
 
 class FrameAnalysis(BaseModel):
-    file_name: str
-    product_category: str
-    best_frames: List[Frame]
+    identified_product: str
+    best_frames: List[BestFrame]

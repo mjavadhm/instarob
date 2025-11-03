@@ -94,7 +94,7 @@ class ReelsService:
 
             ret, frame = cap.read()
             if ret:
-                sanitized_product_name = "".join(c for c in analysis.product_category if c.isalnum() or c in ('_', '-')).rstrip()
+                sanitized_product_name = "".join(c for c in analysis.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
                 frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
                 frame_path = request_frame_dir / frame_filename
 
