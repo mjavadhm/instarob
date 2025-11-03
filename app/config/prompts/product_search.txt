@@ -1,0 +1,30 @@
+🎯 Task ObjectiveYour goal is to analyze the provided video clip featuring a product. You must generate a single JSON object containing data for the Top 5 frames best suited for a high-precision Reverse Image Search.Your output must be only the JSON object and nothing else.✅ Quality Criteria for Best FramesClarity & Focus (No Blur): The product must be sharply in focus and free of motion blur or visual obstructions (like excessive foam).Completeness: The entire product must be fully visible within the frame.Optimal View: The product should be captured from a distinct, clear angle that best showcases its unique shape and features.📝 Required Output Format (JSON)You must output a single JSON object with the following structure.KeyTypeDescriptionidentified_productStringThe generic type of product identified in the video (e.g., "Hand Pump Foam Sprayer").best_framesArray of ObjectsA list of the 5 top-ranked frames.best_frames[*].rankIntegerRanking from 1 (best) to 5.best_frames[*].timestamp_secondsFloatThe exact time in the video (in seconds) for frame extraction (e.g., 2.10).best_frames[*].descriptionStringA brief justification for the frame choice (e.g., "Excellent lighting, pre-spray phase").Example JSON Output (Based on Analysis)JSON{
+  "identified_product": "Hand Pump Foam Sprayer",
+  "best_frames": [
+    {
+      "rank": 1,
+      "timestamp_seconds": 0.67,
+      "description": "Optimal clarity and full product visibility before the spray obscures details. Excellent for image hashing."
+    },
+    {
+      "rank": 2,
+      "timestamp_seconds": 2.10,
+      "description": "Stable frame, clear view of the pump handle and trigger mechanism. Minimal background distractions."
+    },
+    {
+      "rank": 3,
+      "timestamp_seconds": 4.14,
+      "description": "High visibility during the initial spraying action. Product is fully in frame."
+    },
+    {
+      "rank": 4,
+      "timestamp_seconds": 6.80,
+      "description": "Mid-spray frame showing the product in use. Good clarity of the bottle and handle."
+    },
+    {
+      "rank": 5,
+      "timestamp_seconds": 13.24,
+      "description": "Final clear shot, product tilted slightly, but main features are sharp and identifiable."
+    }
+  ]
+}
