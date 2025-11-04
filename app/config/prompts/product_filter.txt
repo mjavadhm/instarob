@@ -5,7 +5,9 @@ Based on the user's search query: "{search_query}"
 Review the following list of products:
 {product_list_json}
 
-Please return a JSON array containing only the "random_key"s of the products that are directly relevant to the search query. The output must be a valid JSON array of strings and nothing else.
+Please return a JSON object containing a single key "relevant_keys". The value of this key must be a JSON array containing only the "random_key"s of the products that are directly relevant to the search query. The output must be a valid JSON object and nothing else.
 
 Example format:
-["randomkey_1", "randomkey_2", "randomkey_3"]
+{
+  "relevant_keys": ["randomkey_1", "randomkey_2", "randomkey_3"]
+}

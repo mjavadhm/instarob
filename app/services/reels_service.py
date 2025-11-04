@@ -227,10 +227,15 @@ class ReelsService:
                         logger.info(f"Combined list of {len(product_list_to_filter)} unique products will be sent to LLM for filtering.")
 
                         # Filter with the second LLM agent
-                        relevant_keys = await filter_service.filter_products_with_llm(
+                        relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
                             products=product_list_to_filter,
                             search_query=analysis_result.search_query_persian
                         )
+
+                        # Aggregate token counts
+                        analysis_result.prompt_token_count += filter_prompt_tokens
+                        analysis_result.response_token_count += filter_response_tokens
+                        logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
 
                         # The `filter_products_with_llm` method returns an empty list if no relevant products are found or an error occurs.
                         # The list comprehension below will correctly produce an empty list in such cases.
