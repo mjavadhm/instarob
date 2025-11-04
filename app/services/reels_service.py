@@ -140,11 +140,20 @@ class ReelsService:
             model_name = self.llm_config.get("model", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
 
+            # Log token usage for the prompt
+            prompt_token_count = await model.count_tokens_async([self.prompt, video_file])
+            logger.info(f"Prompt token count: {prompt_token_count.total_tokens}")
+
             logger.info(f"Sending request to Gemini model '{model_name}'...")
             response = await model.generate_content_async([self.prompt, video_file])
 
+            # Log token usage for the response
+            response_token_count = await model.count_tokens_async(response.text)
+            logger.info(f"Response token count: {response_token_count.total_tokens}")
+
             # 3. Parse the response
             response_text = response.text.strip()
+            logger.info(f"Raw LLM Response: {response_text}")
             if response_text.startswith("```json"):
                 response_text = response_text[7:]
             if response_text.endswith("```"):
