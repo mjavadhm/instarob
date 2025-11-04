@@ -14,8 +14,12 @@ import google.generativeai as genai
 
 from app.core.config import settings
 from app.core.logging import get_logger
+import base64
+from collections import Counter
+from typing import Optional
+
 from app.models.reel_in import ReelIn
-from app.models.frame_analysis import FrameAnalysis
+from app.models.frame_analysis import FrameAnalysis, BestFrame, ProductInfo
 from app.services.product_service import product_service
 
 logger = get_logger()
@@ -106,6 +110,82 @@ class ReelsService:
 
         cap.release()
 
+    async def _search_single_frame_with_fallback(
+        self, frame_info: BestFrame, request_id: str, identified_product: str
+    ) -> Optional[Dict[str, Any]]:
+        sanitized_product_name = "".join(c for c in identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+        frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+        frame_path = self.frames_dir / request_id / frame_filename
+
+        if not frame_path.exists():
+            logger.warning(f"Frame not found at {frame_path}, skipping search for this frame.")
+            return None
+
+        # Attempt to get cropped image; fallback to original frame
+        image_base64 = await product_service.send_frame(frame_path, identified_product)
+        if not image_base64:
+            logger.info(f"Cropped image not available for {frame_path}. Using original frame.")
+            async with aiofiles.open(frame_path, "rb") as f:
+                image_bytes = await f.read()
+            image_base64 = base64.b64encode(image_bytes).decode("utf-8")
+
+        # Upload to Torob and search
+        image_url = await product_service.upload_to_torob(image_base64)
+        if not image_url:
+            return None
+
+        return await product_service.search_on_torob(image_url)
+
+    async def _search_and_aggregate_products(
+        self, analysis_result: FrameAnalysis, request_id: str
+    ):
+        tasks = []
+        for frame_info in analysis_result.best_frames:
+            task = asyncio.create_task(
+                self._search_single_frame_with_fallback(
+                    frame_info=frame_info,
+                    request_id=request_id,
+                    identified_product=analysis_result.identified_product,
+                )
+            )
+            tasks.append(task)
+
+        search_results = await asyncio.gather(*tasks)
+
+        # Aggregate all products found
+        all_products = []
+        rank1_products = []
+
+        # Keep track of the first searched_image_url to use as a fallback
+        first_searched_url = None
+
+        for i, result in enumerate(search_results):
+            if result and result.get("products"):
+                all_products.extend(result["products"])
+                if (i + 1) == 1:  # Rank 1 frame result
+                    rank1_products = result["products"]
+
+                if not first_searched_url and result.get("searched_image_url"):
+                    first_searched_url = result.get("searched_image_url")
+
+
+        # Count product occurrences
+        product_counter = Counter(p["random_key"] for p in all_products)
+
+        # Filter for products that appeared more than once
+        repeated_products_keys = {key for key, count in product_counter.items() if count > 1}
+
+        final_products = []
+        if repeated_products_keys:
+            # Use a dictionary to keep the first occurrence of each unique product
+            unique_products = {p["random_key"]: p for p in all_products}
+            final_products = [unique_products[key] for key in repeated_products_keys]
+        else:
+            final_products = rank1_products[:5]
+
+        analysis_result.product_info = [ProductInfo(**p) for p in final_products]
+        analysis_result.searched_image_url = first_searched_url
+
     async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
         """
         Orchestrates the main workflow: download, analyze with Gemini, and parse.
@@ -175,29 +255,8 @@ class ReelsService:
                 self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id
             )
 
-            # 6. Search for the product using the best frame
-            # Find the rank 1 frame file path
-            rank1_frame_info = next((f for f in analysis_result.best_frames if f.rank == 1), None)
-            if rank1_frame_info:
-                sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
-                frame_filename = f"{sanitized_product_name}_1.jpg"
-                request_frame_dir = self.frames_dir / reel_in.request_id
-                rank1_frame_path = request_frame_dir / frame_filename
-
-                if rank1_frame_path.exists():
-                    logger.info(f"Starting product search for {rank1_frame_path} with prompt '{analysis_result.identified_product}'")
-                    search_result = await product_service.search_product(
-                        frame_path=rank1_frame_path,
-                        text_prompt=analysis_result.identified_product
-                    )
-
-                    if search_result:
-                        analysis_result.product_info = search_result.get("products")
-                        analysis_result.searched_image_url = search_result.get("searched_image_url")
-                else:
-                    logger.warning(f"Rank 1 frame not found at {rank1_frame_path}, skipping product search.")
-            else:
-                logger.warning("No rank 1 frame found in analysis, skipping product search.")
+            # 6. Search for products using the new multi-frame logic
+            await self._search_and_aggregate_products(analysis_result, reel_in.request_id)
 
             return analysis_result
 
