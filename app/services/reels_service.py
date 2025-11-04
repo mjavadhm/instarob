@@ -175,29 +175,43 @@ class ReelsService:
                 self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id
             )
 
-            # 6. Search for the product using the best frame
-            # Find the rank 1 frame file path
-            rank1_frame_info = next((f for f in analysis_result.best_frames if f.rank == 1), None)
-            if rank1_frame_info:
-                sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
-                frame_filename = f"{sanitized_product_name}_1.jpg"
-                request_frame_dir = self.frames_dir / reel_in.request_id
-                rank1_frame_path = request_frame_dir / frame_filename
+            # 6. Search for products in all best frames concurrently
+            search_tasks = []
+            request_frame_dir = self.frames_dir / reel_in.request_id
+            sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
 
-                if rank1_frame_path.exists():
-                    logger.info(f"Starting product search for {rank1_frame_path} with prompt '{analysis_result.identified_product}'")
-                    search_result = await product_service.search_product(
-                        frame_path=rank1_frame_path,
+            for frame_info in analysis_result.best_frames:
+                frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+                frame_path = request_frame_dir / frame_filename
+
+                if frame_path.exists():
+                    logger.info(f"Queueing product search for {frame_path} with prompt '{analysis_result.identified_product}'")
+                    task = product_service.search_product(
+                        frame_path=frame_path,
                         text_prompt=analysis_result.identified_product
                     )
-
-                    if search_result:
-                        analysis_result.product_info = search_result.get("products")
-                        analysis_result.searched_image_url = search_result.get("searched_image_url")
+                    search_tasks.append(task)
                 else:
-                    logger.warning(f"Rank 1 frame not found at {rank1_frame_path}, skipping product search.")
+                    logger.warning(f"Frame not found at {frame_path}, skipping product search for this frame.")
+
+            if search_tasks:
+                logger.info(f"Running {len(search_tasks)} product searches in parallel...")
+                search_results = await asyncio.gather(*search_tasks)
+
+                all_products = []
+                all_searched_urls = []
+
+                for result in search_results:
+                    if result:
+                        if result.get("products"):
+                            all_products.extend(result["products"])
+                        if result.get("searched_image_url"):
+                            all_searched_urls.append(result["searched_image_url"])
+
+                analysis_result.product_info = all_products
+                analysis_result.searched_image_urls = all_searched_urls
             else:
-                logger.warning("No rank 1 frame found in analysis, skipping product search.")
+                logger.warning("No product searches were queued.")
 
             return analysis_result
 
