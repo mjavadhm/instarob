@@ -8,6 +8,7 @@ aioredis
 asyncpg
 httpx[socks]
 python-socks
+httpx-socks
 google-generativeai
 PyYAML
 opencv-python-headless

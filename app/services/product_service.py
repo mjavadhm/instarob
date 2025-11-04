@@ -2,6 +2,7 @@ import httpx
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import base64
+from httpx_socks import AsyncProxyTransport
 
 from app.core.logging import get_logger
 
@@ -11,11 +12,6 @@ class ProductService:
     def __init__(self):
         pass
 
-    def get_proxies(self) -> Dict[str, str]:
-        return {
-            "http": "socks5://127.0.0.1:2444",
-            "https": "socks5://127.0.0.1:2444"
-        }
 
     async def send_frame(self, frame_path: Path, text_prompt: str) -> Optional[str]:
         """Sends a frame to the external detection service and returns the base64 encoded image if successful."""
@@ -59,13 +55,13 @@ class ProductService:
     async def upload_to_torob(self, image_base64: str) -> Optional[str]:
         """Uploads a base64 encoded image to Torob's image upload API."""
         torob_url = "https://api.torob.com/v4/base-product/search-image-upload/"
-        proxies = self.get_proxies()
+        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
         try:
             image_data = base64.b64decode(image_base64)
             files = {'img': ('image.jpg', image_data, 'image/jpeg')}
 
-            async with httpx.AsyncClient(proxy=proxies) as client:
+            async with httpx.AsyncClient(transport=transport) as client:
                 logger.info("Uploading image to Torob...")
                 response = await client.post(torob_url, files=files, timeout=40)
                 response.raise_for_status()
@@ -90,10 +86,10 @@ class ProductService:
     async def search_on_torob(self, image_url: str) -> Optional[Dict[str, Any]]:
         """Searches Torob by image URL and returns parsed product information."""
         torob_url = f"https://api.torob.com/v4/base-product/search-by-image/?image_url={image_url}"
-        proxies = self.get_proxies()
+        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
         try:
-            async with httpx.AsyncClient(proxy=proxies) as client:
+            async with httpx.AsyncClient(transport=transport) as client:
                 logger.info(f"Searching on Torob with image URL: {image_url}")
                 response = await client.get(torob_url, timeout=40)
                 response.raise_for_status()
