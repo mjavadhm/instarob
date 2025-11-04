@@ -85,7 +85,7 @@ class ProductService:
 
     async def search_on_torob(self, image_url: str) -> Optional[Dict[str, Any]]:
         """
-        Searches Torob by image URL and returns parsed product information for the top 5 results,
+        Searches Torob by image URL and returns all parsed product information,
         along with the URL of the image that was searched.
         """
         torob_url = f"https://api.torob.com/v4/base-product/search-by-image/?image_url={image_url}"
@@ -100,14 +100,14 @@ class ProductService:
                 results = response.json()
 
                 if results.get("results") and len(results["results"]) > 0:
-                    top_results = results["results"][:5]
+                    all_results = results["results"]
                     products_info = [
                         {
                             "name": result.get("name1"),
                             "link": f"https://torob.com{result.get('web_client_absolute_url')}",
                             "random_key": result.get("random_key")
                         }
-                        for result in top_results
+                        for result in all_results
                     ]
                     logger.info(f"Successfully found {len(products_info)} products on Torob.")
 
