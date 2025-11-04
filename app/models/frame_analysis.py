@@ -9,4 +9,4 @@ class BestFrame(BaseModel):
 class FrameAnalysis(BaseModel):
     identified_product: str
     best_frames: List[BestFrame]
-    product_info: Optional[Dict[str, Any]] = Field(None, description="Product information from Torob search.")
+    product_info: Optional[List[Dict[str, Any]]] = Field(None, description="Product information from Torob search.")

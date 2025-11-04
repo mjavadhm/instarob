@@ -83,8 +83,8 @@ class ProductService:
             logger.error(f"An unexpected error occurred during Torob upload: {e}", exc_info=True)
             return None
 
-    async def search_on_torob(self, image_url: str) -> Optional[Dict[str, Any]]:
-        """Searches Torob by image URL and returns parsed product information."""
+    async def search_on_torob(self, image_url: str) -> Optional[List[Dict[str, Any]]]:
+        """Searches Torob by image URL and returns parsed product information for the top 5 results."""
         torob_url = f"https://api.torob.com/v4/base-product/search-by-image/?image_url={image_url}"
         transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
@@ -97,15 +97,17 @@ class ProductService:
                 results = response.json()
 
                 if results.get("results") and len(results["results"]) > 0:
-                    # Assuming the first result is the most relevant one
-                    top_result = results["results"][0]
-                    product_info = {
-                        "name": top_result.get("name1"),
-                        "link": f"https://torob.com{top_result.get('web_client_absolute_url')}",
-                        "random_key": top_result.get("random_key")
-                    }
-                    logger.info(f"Successfully found product on Torob: {product_info['name']}")
-                    return product_info
+                    top_results = results["results"][:5]
+                    products_info = [
+                        {
+                            "name": result.get("name1"),
+                            "link": f"https://torob.com{result.get('web_client_absolute_url')}",
+                            "random_key": result.get("random_key")
+                        }
+                        for result in top_results
+                    ]
+                    logger.info(f"Successfully found {len(products_info)} products on Torob.")
+                    return products_info
                 else:
                     logger.warning("No products found on Torob for the given image.")
                     return None
@@ -117,7 +119,7 @@ class ProductService:
             logger.error(f"An unexpected error occurred during Torob search: {e}", exc_info=True)
             return None
 
-    async def search_product(self, frame_path: Path, text_prompt: str) -> Optional[Dict[str, Any]]:
+    async def search_product(self, frame_path: Path, text_prompt: str) -> Optional[List[Dict[str, Any]]]:
         """
         Orchestrates the full product search workflow:
         1. Sends a frame for detection.
