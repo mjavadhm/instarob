@@ -23,9 +23,6 @@ logger = get_logger()
 
 class ReelsService:
     def __init__(self):
-        # Configure Gemini client
-        genai.configure(api_key=settings.GEMINI_API_KEY)
-
         # Load LLM and prompt configuration
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent

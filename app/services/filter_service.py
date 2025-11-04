@@ -11,10 +11,6 @@ logger = get_logger()
 
 class FilterService:
     def __init__(self):
-        # Configure Gemini client, assuming it's already configured in ReelsService
-        if not genai.get_api_key():
-            genai.configure(api_key=settings.GEMINI_API_KEY)
-
         # Load LLM and prompt configuration
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
