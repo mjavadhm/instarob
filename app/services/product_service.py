@@ -65,7 +65,7 @@ class ProductService:
             image_data = base64.b64decode(image_base64)
             files = {'img': ('image.jpg', image_data, 'image/jpeg')}
 
-            async with httpx.AsyncClient(proxies=proxies) as client:
+            async with httpx.AsyncClient(proxy=proxies) as client:
                 logger.info("Uploading image to Torob...")
                 response = await client.post(torob_url, files=files, timeout=40)
                 response.raise_for_status()
@@ -93,7 +93,7 @@ class ProductService:
         proxies = self.get_proxies()
 
         try:
-            async with httpx.AsyncClient(proxies=proxies) as client:
+            async with httpx.AsyncClient(proxy=proxies) as client:
                 logger.info(f"Searching on Torob with image URL: {image_url}")
                 response = await client.get(torob_url, timeout=40)
                 response.raise_for_status()
