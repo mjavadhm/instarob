@@ -141,15 +141,17 @@ class ReelsService:
             model = genai.GenerativeModel(model_name)
 
             # Log token usage for the prompt
-            prompt_token_count = await model.count_tokens_async([self.prompt, video_file])
-            logger.info(f"Prompt token count: {prompt_token_count.total_tokens}")
+            prompt_token_count_result = await model.count_tokens_async([self.prompt, video_file])
+            prompt_token_count = prompt_token_count_result.total_tokens
+            logger.info(f"Prompt token count: {prompt_token_count}")
 
             logger.info(f"Sending request to Gemini model '{model_name}'...")
             response = await model.generate_content_async([self.prompt, video_file])
 
             # Log token usage for the response
-            response_token_count = await model.count_tokens_async(response.text)
-            logger.info(f"Response token count: {response_token_count.total_tokens}")
+            response_token_count_result = await model.count_tokens_async(response.text)
+            response_token_count = response_token_count_result.total_tokens
+            logger.info(f"Response token count: {response_token_count}")
 
             # 3. Parse the response
             response_text = response.text.strip()
@@ -164,6 +166,9 @@ class ReelsService:
 
             # 4. Validate with Pydantic model
             analysis_result = FrameAnalysis(**analysis_data)
+            analysis_result.prompt_token_count = prompt_token_count
+            analysis_result.response_token_count = response_token_count
+
 
             # 5. Extract and save frames
             await asyncio.to_thread(
@@ -181,11 +186,14 @@ class ReelsService:
 
                 if rank1_frame_path.exists():
                     logger.info(f"Starting product search for {rank1_frame_path} with prompt '{analysis_result.identified_product}'")
-                    product_info = await product_service.search_product(
+                    search_result = await product_service.search_product(
                         frame_path=rank1_frame_path,
                         text_prompt=analysis_result.identified_product
                     )
-                    analysis_result.product_info = product_info
+
+                    if search_result:
+                        analysis_result.product_info = search_result.get("products")
+                        analysis_result.searched_image_url = search_result.get("searched_image_url")
                 else:
                     logger.warning(f"Rank 1 frame not found at {rank1_frame_path}, skipping product search.")
             else:
