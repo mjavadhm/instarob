@@ -6,7 +6,8 @@ pydantic-settings
 python-dotenv
 aioredis
 asyncpg
-httpx
+httpx[socks]
+python-socks
 google-generativeai
 PyYAML
 opencv-python-headless

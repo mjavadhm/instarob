@@ -16,6 +16,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.reel_in import ReelIn
 from app.models.frame_analysis import FrameAnalysis
+from app.services.product_service import product_service
 
 logger = get_logger()
 
@@ -159,6 +160,27 @@ class ReelsService:
             await asyncio.to_thread(
                 self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id
             )
+
+            # 6. Search for the product using the best frame
+            # Find the rank 1 frame file path
+            rank1_frame_info = next((f for f in analysis_result.best_frames if f.rank == 1), None)
+            if rank1_frame_info:
+                sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+                frame_filename = f"{sanitized_product_name}_1.jpg"
+                request_frame_dir = self.frames_dir / reel_in.request_id
+                rank1_frame_path = request_frame_dir / frame_filename
+
+                if rank1_frame_path.exists():
+                    logger.info(f"Starting product search for {rank1_frame_path} with prompt '{analysis_result.identified_product}'")
+                    product_info = await product_service.search_product(
+                        frame_path=rank1_frame_path,
+                        text_prompt=analysis_result.identified_product
+                    )
+                    analysis_result.product_info = product_info
+                else:
+                    logger.warning(f"Rank 1 frame not found at {rank1_frame_path}, skipping product search.")
+            else:
+                logger.warning("No rank 1 frame found in analysis, skipping product search.")
 
             return analysis_result
 
