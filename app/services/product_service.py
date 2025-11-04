@@ -126,6 +126,45 @@ class ProductService:
             logger.error(f"An unexpected error occurred during Torob search: {e}", exc_info=True)
             return None
 
+    async def search_on_torob_by_text(self, query: str) -> Optional[List[Dict[str, Any]]]:
+        """Searches Torob by a text query and returns up to 15 non-advertisement products."""
+        search_url = f"https://api.torob.com/v4/base-product/search/?q={query}&size=100&page=1"
+        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
+
+        try:
+            async with httpx.AsyncClient(transport=transport) as client:
+                logger.info(f"Searching on Torob with text query: '{query}'")
+                response = await client.get(search_url, timeout=40)
+                response.raise_for_status()
+
+                data = response.json()
+                results = data.get("results", [])
+
+                if not results:
+                    logger.warning(f"No text search results found on Torob for query: '{query}'")
+                    return None
+
+                products_info = []
+                for result in results:
+                    if not result.get("is_adv"):
+                        products_info.append({
+                            "name": result.get("name1"),
+                            "link": f"https://torob.com{result.get('web_client_absolute_url')}",
+                            "random_key": result.get("random_key")
+                        })
+                        if len(products_info) >= 15:
+                            break
+
+                logger.info(f"Found {len(products_info)} non-advertisement products from text search.")
+                return products_info
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error during Torob text search: {e.response.status_code} - {e.response.text}")
+            return None
+        except Exception as e:
+            logger.error(f"An unexpected error occurred during Torob text search: {e}", exc_info=True)
+            return None
+
     async def search_product(self, frame_path: Path, text_prompt: str) -> Optional[Dict[str, Any]]:
         """
         Orchestrates the full product search workflow:

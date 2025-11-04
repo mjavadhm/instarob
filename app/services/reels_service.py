@@ -17,6 +17,7 @@ from app.core.logging import get_logger
 from app.models.reel_in import ReelIn
 from app.models.frame_analysis import FrameAnalysis
 from app.services.product_service import product_service
+from app.services.filter_service import filter_service
 
 logger = get_logger()
 
@@ -210,6 +211,39 @@ class ReelsService:
 
                 analysis_result.product_info = all_products
                 analysis_result.searched_image_urls = all_searched_urls
+
+                # 7. (New) Text search and filtering if a Persian query is available
+                if analysis_result.search_query_persian:
+                    logger.info(f"Persian search query found: '{analysis_result.search_query_persian}'. Starting text search.")
+
+                    # Search Torob by text
+                    text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
+
+                    if text_search_results:
+                        # Combine and deduplicate image and text search results
+                        combined_products = {p['random_key']: p for p in all_products}
+                        for p in text_search_results:
+                            if p['random_key'] not in combined_products:
+                                combined_products[p['random_key']] = p
+
+                        product_list_to_filter = list(combined_products.values())
+                        logger.info(f"Combined list of {len(product_list_to_filter)} unique products will be sent to LLM for filtering.")
+
+                        # Filter with the second LLM agent
+                        relevant_keys = await filter_service.filter_products_with_llm(
+                            products=product_list_to_filter,
+                            search_query=analysis_result.search_query_persian
+                        )
+
+                        # The `filter_products_with_llm` method returns an empty list if no relevant products are found or an error occurs.
+                        # The list comprehension below will correctly produce an empty list in such cases.
+                        filtered_products = [p for p in product_list_to_filter if p['random_key'] in relevant_keys]
+                        analysis_result.product_info = filtered_products
+                        logger.info(f"Filtering complete. Final product count: {len(filtered_products)}")
+
+                else:
+                    logger.info("No Persian search query provided. Skipping text search and filtering.")
+
             else:
                 logger.warning("No product searches were queued.")
 
