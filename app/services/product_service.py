@@ -1,3 +1,4 @@
+import aiofiles
 import httpx
 from pathlib import Path
 from typing import Dict, Any, List, Optional
@@ -50,6 +51,21 @@ class ProductService:
             return None
         except Exception as e:
             logger.error(f"An unexpected error occurred while sending frame: {e}", exc_info=True)
+            return None
+        
+    async def convert_file_to_base64_async(file_path: Path) -> Optional[str]:
+        
+        try:
+            async with aiofiles.open(file_path, "rb") as f:
+                image_bytes = await f.read()
+                base64_bytes = base64.b64encode(image_bytes)
+                return base64_bytes.decode('utf-8')
+                
+        except FileNotFoundError:
+            logger.error(f"Error: File not found at {file_path}")
+            return None
+        except Exception as e:
+            logger.error(f"An error occurred during async base64 conversion: {e}", exc_info=True)
             return None
 
     async def upload_to_torob(self, image_base64: str) -> Optional[str]:
@@ -173,7 +189,8 @@ class ProductService:
         3. Searches Torob with the uploaded image URL.
         """
         # 1. Get the base64 encoded image from the detection service
-        image_base64 = await self.send_frame(frame_path, text_prompt)
+        # image_base64 = await self.send_frame(frame_path, text_prompt)
+        image_base64 = await self.convert_file_to_base64_async(frame_path)
         if not image_base64:
             logger.error("Failed to get base64 image from detection service. Aborting product search.")
             return None
