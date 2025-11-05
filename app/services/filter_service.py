@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import google.generativeai as genai
-from google.generativeai.types import GenerationResponse
+from google.generativeai.types import GenerateContentResponse
 
 from app.core.logging import get_logger
 
