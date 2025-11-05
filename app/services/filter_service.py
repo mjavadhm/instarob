@@ -1,7 +1,7 @@
 import yaml
 import json
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Optional, Tuple
 import google.generativeai as genai
 from google.generativeai.types import GenerateContentResponse
 
@@ -25,7 +25,7 @@ class FilterService:
         self.model = genai.GenerativeModel(model_name)
         logger.info(f"FilterService initialized. Model: {model_name}")
 
-    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str) -> Tuple[List[str], int, int]:
+    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str, product_description: Optional[str]) -> Tuple[List[str], int, int]:
         """
         Uses an LLM to filter a list of products based on a search query and identified product.
         Returns a tuple containing the list of 'random_key's, prompt tokens, and response tokens.
@@ -45,6 +45,7 @@ class FilterService:
             prompt = self.prompt_template.format(
                 search_query=search_query,
                 identified_product=identified_product,
+                product_description=product_description or identified_product,
                 product_list_json=product_list_json
             )
 

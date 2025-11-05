@@ -238,7 +238,8 @@ class ReelsService:
                     relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
                         products=product_list_to_filter,
                         search_query=analysis_result.search_query_persian,
-                        identified_product=analysis_result.identified_product  
+                        identified_product=analysis_result.identified_product,
+                        product_description=analysis_result.product_description
                     )
 
                     # Aggregate token counts
