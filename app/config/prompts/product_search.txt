@@ -1,0 +1,105 @@
+🎯 Task: Find the 5 Best (Least Cluttered) Frames and Product Query
+
+Your job is to identify the main product, create a Persian search query for it, and find the five least cluttered frames in the entire video. These frames must be selected from five different time periods and be ideal for image search or object detection.
+
+To do this, you MUST follow these steps:
+
+Identify Subject & Create Queries:
+
+a. identified_product: First, identify the primary subject or product. Assign its English name (suitable for an object detection model like Grounding DINO) to this field (e.g., "smart television," "hand pump foam sprayer").
+
+b. search_query_persian: Create a natural Persian (فارسی) text search query for this product.
+
+The query itself must be in Persian.
+
+Exception: Specific brand names, model numbers, or codes (e.g., "GoPro", "17 Pro Max", "RTX 4090") must remain in their original English/Latin script within the Persian query.
+
+Example: "خرید گوشی 17 Pro Max" or "قیمت دوربین GoPro".
+
+Scan Entire Video: Scan the ENTIRE video from start to finish.
+
+Identify 5 Least Cluttered Moments: Identify 5 distinct moments that offer the clearest, most complete, and most isolated shots of the subject.
+
+Priority: Select frames with the minimum possible background clutter or distracting elements (e.g., a TV that is turned off, a product on a plain background, or a subject in sharp focus with a blurred background).
+
+Ensure Time Distribution: Ensure these 5 shots are from different time periods to provide a good overview (e.g., one from the beginning, one from the early-middle, one from the exact middle, one from the late-middle, and one from the end).
+
+Compare and Rank: Compare all the clear, uncluttered frames you have selected.
+
+Rank your 5 selections from 1 (the absolute best, clearest, and least cluttered shot, perfect for image search) down to 5 (still very good and clear, but slightly more cluttered than #1).
+
+Goal: I need the product queries and the top 5 least cluttered frames from the entire video, representing different moments.
+
+Your output must be only the JSON object.
+
+📝 Required JSON Output
+
+The JSON object must contain identified_product, search_query_persian, and the best_frames array. The best_frames array must contain exactly five items, ranked 1 through 5.
+
+Example JSON Output:
+
+JSON
+
+
+
+{
+
+  "identified_product": "Hand Pump Foam Sprayer",
+
+  "search_query_persian": "خرید اسپری کف پاش دستی",
+
+  "best_frames": [
+
+    {
+
+      "rank": 1,
+
+      "timestamp_seconds": 12.45,
+
+      "description": "Absolute best, least cluttered, full view of the product against a plain background (middle)."
+
+    },
+
+    {
+
+      "rank": 2,
+
+      "timestamp_seconds": 3.12,
+
+      "description": "Excellent, clear close-up of the nozzle, well-isolated from the background (beginning)."
+
+    },
+
+    {
+
+      "rank": 3,
+
+      "timestamp_seconds": 25.80,
+
+      "description": "Good view of the full bottle, background is slightly busy but subject is clear (end)."
+
+    },
+
+    {
+
+      "rank": 4,
+
+      "timestamp_seconds": 18.05,
+
+      "description": "Clear detail shot of the pump; subject is in focus, background is blurred (late-middle)."
+
+    },
+
+    {
+
+      "rank": 5,
+
+      "timestamp_seconds": 8.50,
+
+      "description": "A clear, uncluttered shot from an alternative angle (early-middle)."
+
+    }
+
+  ]
+
+}
