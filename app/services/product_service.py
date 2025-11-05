@@ -53,7 +53,7 @@ class ProductService:
             logger.error(f"An unexpected error occurred while sending frame: {e}", exc_info=True)
             return None
         
-    async def convert_file_to_base64_async(file_path: Path) -> Optional[str]:
+    async def convert_file_to_base64_async(self, file_path: Path) -> Optional[str]:
         
         try:
             async with aiofiles.open(file_path, "rb") as f:
