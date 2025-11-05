@@ -216,38 +216,47 @@ class ReelsService:
                     # Search Torob by text
                     text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
 
+                    # Combine and deduplicate image and text search results
+                    combined_products = {}
+                    
+                    
+                    for p in all_products:
+                        p['source'] = 'image'
+                        combined_products[p['random_key']] = p
+
+                    
                     if text_search_results:
-                        # Combine and deduplicate image and text search results
-                        combined_products = {p['random_key']: p for p in all_products}
                         for p in text_search_results:
+                            p['source'] = 'text'
                             if p['random_key'] not in combined_products:
                                 combined_products[p['random_key']] = p
 
-                        product_list_to_filter = list(combined_products.values())
-                        logger.info(f"Combined list of {len(product_list_to_filter)} unique products will be sent to LLM for filtering.")
+                    product_list_to_filter = list(combined_products.values())
+                    logger.info(f"Combined list of {len(product_list_to_filter)} unique products (tagged by source) will be sent to LLM for filtering.")
 
-                        # Filter with the second LLM agent
-                        relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
-                            products=product_list_to_filter,
-                            search_query=analysis_result.search_query_persian
-                        )
+                    
+                    relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
+                        products=product_list_to_filter,
+                        search_query=analysis_result.search_query_persian,
+                        identified_product=analysis_result.identified_product  
+                    )
 
-                        # Aggregate token counts
-                        analysis_result.prompt_token_count += filter_prompt_tokens
-                        analysis_result.response_token_count += filter_response_tokens
-                        logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
+                    # Aggregate token counts
+                    analysis_result.prompt_token_count += filter_prompt_tokens
+                    analysis_result.response_token_count += filter_response_tokens
+                    logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
 
-                        # The `filter_products_with_llm` method returns an empty list if no relevant products are found or an error occurs.
-                        # The list comprehension below will correctly produce an empty list in such cases.
-                        filtered_products = [p for p in product_list_to_filter if p['random_key'] in relevant_keys]
-                        analysis_result.product_info = filtered_products
-                        logger.info(f"Filtering complete. Final product count: {len(filtered_products)}")
+                    filtered_products = [p for p in product_list_to_filter if p['random_key'] in relevant_keys]
+                    analysis_result.product_info = filtered_products
+                    logger.info(f"Filtering complete. Final product count: {len(filtered_products)}")
 
                 else:
                     logger.info("No Persian search query provided. Skipping text search and filtering.")
+                    analysis_result.product_info = all_products 
 
             else:
                 logger.warning("No product searches were queued.")
+                analysis_result.product_info = []
 
             return analysis_result
 

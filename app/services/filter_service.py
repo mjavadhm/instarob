@@ -25,9 +25,9 @@ class FilterService:
         self.model = genai.GenerativeModel(model_name)
         logger.info(f"FilterService initialized. Model: {model_name}")
 
-    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str) -> Tuple[List[str], int, int]:
+    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str) -> Tuple[List[str], int, int]:
         """
-        Uses an LLM to filter a list of products based on a search query.
+        Uses an LLM to filter a list of products based on a search query and identified product.
         Returns a tuple containing the list of 'random_key's, prompt tokens, and response tokens.
         """
         try:
@@ -37,12 +37,14 @@ class FilterService:
                 return [], prompt_tokens, response_tokens
 
             product_list_for_prompt = [
-                {"name": p.get("name"), "random_key": p.get("random_key")} for p in products
+                {"name": p.get("name"), "random_key": p.get("random_key"), "source": p.get("source", "unknown")} 
+                for p in products
             ]
             product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
 
             prompt = self.prompt_template.format(
                 search_query=search_query,
+                identified_product=identified_product,
                 product_list_json=product_list_json
             )
 
