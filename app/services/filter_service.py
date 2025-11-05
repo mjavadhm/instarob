@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import List, Dict, Any, Tuple
 import google.generativeai as genai
+from google.generativeai.types import GenerationResponse
 
 from app.core.logging import get_logger
 
@@ -52,6 +53,11 @@ class FilterService:
 
             logger.info(f"Sending request to LLM to filter products for query: '{search_query}'")
             response = await self.model.generate_content_async(prompt)
+
+            # Check for blocked responses or missing content
+            if not response.parts:
+                logger.error(f"LLM filter response was blocked or empty. Feedback: {response.prompt_feedback}")
+                return [], prompt_tokens, response_tokens
 
             # Log raw response for debugging
             response_text = response.text.strip()
