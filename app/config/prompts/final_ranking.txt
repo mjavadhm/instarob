@@ -19,7 +19,7 @@ Return a JSON object containing a single key "ranked_keys". The value must be a 
 
 Example format:
 ```json
-{
+{{
   "ranked_keys": ["most_similar_key", "next_most_similar_key", "least_similar_key"]
-}
+}}
 ```

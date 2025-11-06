@@ -17,7 +17,7 @@ Return a JSON object containing a single key "relevant_keys". The value must be 
 
 Example format:
 ```json
-{
+{{
   "relevant_keys": ["randomkey_1", "randomkey_2"]
-}
+}}
 ```
