@@ -111,6 +111,18 @@ class ReelsService:
 
         cap.release()
 
+    def _get_frame_paths(self, request_id: str, analysis_result: FrameAnalysis) -> List[Path]:
+        """Returns a list of paths to the saved frames for a given request."""
+        frame_paths = []
+        request_frame_dir = self.frames_dir / request_id
+        sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+        for frame_info in analysis_result.best_frames:
+            frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+            frame_path = request_frame_dir / frame_filename
+            if frame_path.exists():
+                frame_paths.append(frame_path)
+        return frame_paths
+
     async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
         """
         Orchestrates the main workflow: download, analyze with Gemini, and parse.
@@ -222,11 +234,13 @@ class ReelsService:
                 all_searched_urls = []
 
                 for result in search_results:
-                    if result:
-                        if result.get("products"):
-                            all_products.extend(result["products"])
-                        if result.get("searched_image_url"):
-                            all_searched_urls.append(result["searched_image_url"])
+                    if result and result.get("products"):
+                        searched_url = result.get("searched_image_url")
+                        for p in result["products"]:
+                            p["image_url"] = searched_url  # Add image_url to each product from image search
+                        all_products.extend(result["products"])
+                        if searched_url:
+                            all_searched_urls.append(searched_url)
 
                 analysis_result.product_info = all_products
                 analysis_result.searched_image_urls = all_searched_urls
@@ -239,15 +253,7 @@ class ReelsService:
                     text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
 
                     if text_search_results:
-                        # Get paths of saved frames
-                        frame_paths = []
-                        request_frame_dir = self.frames_dir / reel_in.request_id
-                        sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
-                        for frame_info in analysis_result.best_frames:
-                            frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
-                            frame_path = request_frame_dir / frame_filename
-                            if frame_path.exists():
-                                frame_paths.append(frame_path)
+                        frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
 
                         # Filter text search results with OpenRouter
                         relevant_text_keys, or_prompt_tokens, or_completion_tokens = await openrouter_service.filter_text_search_results(
@@ -304,8 +310,33 @@ class ReelsService:
                     logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
 
                     filtered_products = [p for p in product_list_to_filter if p['random_key'] in relevant_keys]
-                    analysis_result.product_info = filtered_products
-                    logger.info(f"Filtering complete. Final product count: {len(filtered_products)}")
+
+                    if filtered_products:
+                        logger.info(f"Initial filtering complete. Sending {len(filtered_products)} products for final ranking.")
+                        frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
+
+                        ranked_keys, rank_prompt_tokens, rank_completion_tokens, rank_model_name = await openrouter_service.rank_and_filter_final_list(
+                            products=filtered_products,
+                            frame_paths=frame_paths,
+                            identified_product=analysis_result.identified_product
+                        )
+
+                        # Calculate cost for the final ranking call
+                        total_cost += cost_service.calculate_cost(
+                            model_name=rank_model_name,
+                            prompt_tokens=rank_prompt_tokens,
+                            response_tokens=rank_completion_tokens
+                        )
+
+                        # Create a map for quick lookups and preserve order from ranking
+                        product_map = {p['random_key']: p for p in filtered_products}
+                        final_ranked_products = [product_map[key] for key in ranked_keys if key in product_map]
+
+                        analysis_result.product_info = final_ranked_products
+                        logger.info(f"Final ranking complete. Final product count: {len(final_ranked_products)}")
+                    else:
+                        analysis_result.product_info = []
+                        logger.info("No products left after initial filtering to send for final ranking.")
 
                 else:
                     logger.info("No Persian search query provided. Skipping text search and filtering.")
