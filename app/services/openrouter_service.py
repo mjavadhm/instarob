@@ -4,40 +4,83 @@ import httpx
 import aiofiles
 import base64
 from pathlib import Path
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.models.caption_analysis import CaptionAnalysis
 
 logger = get_logger()
 
 class OpenRouterService:
     def __init__(self):
-        # Load LLM configuration
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
         with open(config_path, "r") as f:
-            self.llm_config = yaml.safe_load(f).get("text_result_filter_openrouter", {})
+            self.llm_configs = yaml.safe_load(f)
 
-        prompt_file = self.llm_config.get("prompt_file", "prompts/text_result_filter.txt")
-        prompt_file_path = prompt_dir.parent / "config" / prompt_file
+        # Config for Text Result Filter
+        text_filter_config = self.llm_configs.get("text_result_filter_openrouter", {})
+        self.text_filter_model = text_filter_config.get("model", "google/gemini-flash-1.5")
+        prompt_file_path = prompt_dir.parent / "config" / text_filter_config.get("prompt_file")
         with open(prompt_file_path, "r") as f:
-            self.prompt_template = f.read()
+            self.text_filter_prompt_template = f.read()
 
-        self.model_name = self.llm_config.get("model", "google/gemini-flash-1.5")
+        # Config for Caption Analysis
+        caption_analysis_config = self.llm_configs.get("caption_analysis", {})
+        self.caption_analysis_model = caption_analysis_config.get("model", "google/gemini-flash-1.5")
+        prompt_file_path = prompt_dir.parent / "config" / caption_analysis_config.get("prompt_file")
+        with open(prompt_file_path, "r") as f:
+            self.caption_analysis_prompt_template = f.read()
 
-        # Use AsyncOpenAI client
         self.client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=settings.OPENROUTER_API_KEY,
         )
-        logger.info(f"OpenRouterService initialized with AsyncOpenAI. Model: {self.model_name}")
+        logger.info(f"OpenRouterService initialized with AsyncOpenAI.")
 
     async def _image_to_base64(self, image_path: Path) -> str:
         async with aiofiles.open(image_path, "rb") as f:
             binary_data = await f.read()
             return base64.b64encode(binary_data).decode('utf-8')
+
+    async def analyze_caption_for_search_query(self, caption: str) -> Tuple[Optional[CaptionAnalysis], int, int]:
+        try:
+            prompt = self.caption_analysis_prompt_template.format(caption=caption)
+            messages = [{"role": "user", "content": prompt}]
+
+            logger.info(f"Sending async request to OpenRouter for caption analysis.")
+
+            completion = await self.client.chat.completions.create(
+                model=self.caption_analysis_model,
+                messages=messages,
+                extra_headers={
+                    "HTTP-Referer": "https://instarob.ai",
+                    "X-Title": "Instarob AI",
+                },
+                response_format={"type": "json_object"},
+            )
+
+            response_text = completion.choices[0].message.content.strip()
+            logger.info(f"Raw OpenRouter Response (Caption Analysis): {response_text}")
+
+            parsed_json = json.loads(response_text)
+            analysis_result = CaptionAnalysis(**parsed_json)
+
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
+
+            logger.info(f"Caption analysis successful. Query: '{analysis_result.search_query_persian}', Confidence: {analysis_result.confidence}")
+            return analysis_result, prompt_tokens, completion_tokens
+
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Failed to parse or validate OpenRouter response for caption analysis: {e}", exc_info=True)
+            return None, 0, 0
+        except Exception as e:
+            logger.error(f"An error occurred during OpenRouter caption analysis: {e}", exc_info=True)
+            return None, 0, 0
 
     async def filter_text_search_results(
         self,
@@ -46,7 +89,7 @@ class OpenRouterService:
         identified_product: str
     ) -> Tuple[List[str], int, int]:
         try:
-            prompt_text = self.prompt_template.format(identified_product=identified_product)
+            prompt_text = self.text_filter_prompt_template.format(identified_product=identified_product)
             content = [{"type": "text", "text": prompt_text}]
 
             for frame_path in frame_paths:
@@ -76,7 +119,7 @@ class OpenRouterService:
             logger.info(f"Sending async request to OpenRouter with {len(frame_paths)} frames and {len(products)} products for text filtering.")
 
             completion = await self.client.chat.completions.create(
-                model=self.model_name,
+                model=self.text_filter_model,
                 messages=messages,
                 extra_headers={
                     "HTTP-Referer": "https://instarob.ai",

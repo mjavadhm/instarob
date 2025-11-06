@@ -14,3 +14,7 @@ text_result_filter_openrouter:
 final_ranking_openrouter:
   model: "google/gemini-2.5-flash-lite-preview-09-2025"
   prompt_file: "prompts/final_ranking.txt"
+
+caption_analysis:
+  model: "google/gemini-2.5-flash-lite-preview-09-2025"
+  prompt_file: "prompts/caption_analysis.txt"
