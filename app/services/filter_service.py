@@ -2,17 +2,19 @@ import yaml
 import json
 import httpx
 import os
+import asyncio
 import base64
+import aiofiles
 from pathlib import Path
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
 
 class FilterService:
     def __init__(self):
-        # Load LLM and prompt configuration from the correct section for OpenRouter
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
         with open(config_path, "r") as f:
@@ -20,128 +22,123 @@ class FilterService:
 
         prompt_file = self.llm_config.get("prompt_file", "prompts/final_ranking.txt")
         prompt_file_path = prompt_dir.parent / "config" / prompt_file
-
         with open(prompt_file_path, "r") as f:
             self.prompt_template = f.read()
 
         self.model_name = self.llm_config.get("model", "google/gemini-flash-1.5-pro-latest")
-        self.api_key = os.getenv("OPENROUTER_API_KEY")
+        self.api_key = settings.OPENROUTER_API_KEY
         self.api_url = "https://openrouter.ai/api/v1/chat/completions"
 
-        # Setup an async HTTP client
         self.client = httpx.AsyncClient(
             headers={
                 "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://instarob.ai",
+                "X-Title": "Instarob AI",
+            },
+            timeout=180
         )
-        logger.info(f"FilterService initialized for OpenRouter. Model: {self.model_name}")
+        logger.info(f"FilterService initialized for async OpenRouter ranking. Model: {self.model_name}")
 
-    async def _encode_image_to_base64(self, image_path: Path) -> Optional[str]:
-        """Encodes an image file to a base64 string."""
+    async def _image_to_base64(self, image_path: Path) -> str:
+        async with aiofiles.open(image_path, "rb") as f:
+            binary_data = await f.read()
+            return base64.b64encode(binary_data).decode('utf-8')
+
+    async def _download_and_encode_image(self, url: str) -> Optional[str]:
+        """Downloads an image from a URL and returns it as a base64 string."""
         try:
-            if not image_path.exists():
-                logger.error(f"Image file not found at {image_path}")
-                return None
-            with open(image_path, "rb") as image_file:
-                return base64.b64encode(image_file.read()).decode('utf-8')
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=30)
+                response.raise_for_status()
+                return base64.b64encode(response.content).decode('utf-8')
         except Exception as e:
-            logger.error(f"Error encoding image {image_path} to base64: {e}", exc_info=True)
+            logger.error(f"Failed to download or encode image from {url}: {e}", exc_info=True)
             return None
 
-    async def rank_products_with_openrouter(
+    async def rank_products_with_llm(
         self,
         products: List[Dict[str, Any]],
-        ground_truth_image_path: Path
-    ) -> List[str]:
-        """
-        Uses an OpenRouter multimodal model to rank products based on a ground truth image.
-
-        Args:
-            products: A list of candidate products (deduplicated).
-            ground_truth_image_path: The file path to the main video frame for visual comparison.
-
-        Returns:
-            A list of 'random_key's, sorted by the model's ranking.
-        """
+        ground_truth_frame_paths: List[Path],
+        identified_product: str
+    ) -> Tuple[List[str], int, int, str]:
         if not self.api_key:
-            logger.error("OPENROUTER_API_KEY not set. Cannot proceed with ranking.")
-            return []
-
-        if not products:
-            logger.warning("No products provided to rank.")
-            return []
-
-        base64_image = await self._encode_image_to_base64(ground_truth_image_path)
-        if not base64_image:
-            logger.error("Failed to encode ground truth image. Aborting ranking.")
-            return []
-
-        # Prepare the product list for the prompt
-        product_list_for_prompt = []
-        for p in products:
-            product_data = {
-                "name": p.get("name"),
-                "random_key": p.get("random_key"),
-                "image_url": p.get("image_url")
-            }
-            product_list_for_prompt.append(product_data)
-        product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
-
-        prompt = self.prompt_template.format(
-            product_list_json=product_list_json
-        )
-
-        messages = [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {
-                        "type": "image_url",
-                        "image_url": {
-                            "url": f"data:image/jpeg;base64,{base64_image}"
-                        }
-                    }
-                ]
-            }
-        ]
-
-        payload = {
-            "model": self.model_name,
-            "messages": messages,
-            "response_format": {"type": "json_object"},
-            "stream": False
-        }
+            logger.error("OPENROUTER_API_KEY not set.")
+            return [], 0, 0, self.model_name
 
         try:
-            logger.info(f"Sending request to OpenRouter for final ranking. Products count: {len(products)}")
-            response = await self.client.post(self.api_url, json=payload, timeout=120)
+            prompt_text = self.prompt_template.format(identified_product=identified_product)
+
+            # Start with the main prompt and the reference video frames (ground truth)
+            content = [{"type": "text", "text": prompt_text}]
+            for frame_path in ground_truth_frame_paths:
+                base64_image = await self._image_to_base64(frame_path)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                })
+
+            content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\nHere are the candidate products. Please rank them based on their visual similarity to the product in the reference images."})
+
+            # Download and encode all product images concurrently
+            image_urls = [p.get("image_url") for p in products if p.get("image_url")]
+            image_coroutines = [self._download_and_encode_image(url) for url in image_urls]
+            base64_images = await asyncio.gather(*image_coroutines)
+
+            # Create a map of URL to base64 string for easy lookup
+            url_to_base64_map = dict(zip(image_urls, base64_images))
+
+            # For each product, add its details and its base64 encoded image
+            for i, product in enumerate(products):
+                product_info = (
+                    f"\n\nProduct {i+1}:\n"
+                    f"Name: {product.get('name')}\n"
+                    f"Random Key: {product.get('random_key')}"
+                )
+                content.append({"type": "text", "text": product_info})
+
+                image_url = product.get("image_url")
+                if image_url and url_to_base64_map.get(image_url):
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{url_to_base64_map[image_url]}"}
+                    })
+                else:
+                    content.append({"type": "text", "text": "Image not available."})
+
+            messages = [{"role": "user", "content": content}]
+            payload = {
+                "model": self.model_name,
+                "messages": messages,
+                "response_format": {"type": "json_object"},
+            }
+
+            logger.info(f"Sending async request to OpenRouter for final ranking with {len(products)} products.")
+            response = await self.client.post(self.api_url, json=payload)
             response.raise_for_status()
 
             response_data = response.json()
             response_text = response_data['choices'][0]['message']['content'].strip()
-            logger.info(f"Raw OpenRouter ranking response: {response_text}")
+            logger.info(f"Raw OpenRouter Final Ranking Response: {response_text}")
 
             parsed_json = json.loads(response_text)
-            ranked_keys = parsed_json.get("ranked_product_keys", [])
+            ranked_keys = parsed_json.get("ranked_keys", [])
+
+            prompt_tokens = response_data.get('usage', {}).get('prompt_tokens', 0)
+            completion_tokens = response_data.get('usage', {}).get('completion_tokens', 0)
 
             if isinstance(ranked_keys, list) and all(isinstance(k, str) for k in ranked_keys):
-                logger.info(f"OpenRouter ranked {len(ranked_keys)} products successfully.")
-                return ranked_keys
+                logger.info(f"OpenRouter ranked {len(ranked_keys)} products.")
+                return ranked_keys, prompt_tokens, completion_tokens, self.model_name
             else:
-                logger.warning(f"OpenRouter response key 'ranked_product_keys' was not a list of strings: {ranked_keys}")
-                return []
+                logger.warning(f"OpenRouter response key 'ranked_keys' was not a list of strings: {ranked_keys}")
+                return [], prompt_tokens, completion_tokens, self.model_name
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error occurred while calling OpenRouter: {e.response.status_code} {e.response.text}", exc_info=True)
-            return []
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed for OpenRouter response: {e}", exc_info=True)
-            return []
+            logger.error(f"HTTP error during OpenRouter final ranking: {e.response.status_code} {e.response.text}", exc_info=True)
+            return [], 0, 0, self.model_name
         except Exception as e:
-            logger.error(f"An unexpected error occurred during OpenRouter ranking: {e}", exc_info=True)
-            return []
+            logger.error(f"An error occurred during OpenRouter final ranking: {e}", exc_info=True)
+            return [], 0, 0, self.model_name
 
-# Singleton instance
 filter_service = FilterService()

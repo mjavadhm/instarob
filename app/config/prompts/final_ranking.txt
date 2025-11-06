@@ -1,10 +1,11 @@
-As a vision-enabled shopping assistant, your task is to rank the following products based on their visual and functional similarity to the main product shown in the user-provided image.
+Your task is to act as an expert shopping assistant. You will be given a set of reference images showing a product a user is interested in. You will also be given a list of candidate products, each with its own name, a unique `random_key`, and an accompanying image.
 
-Analyze the user's image carefully to understand the primary product of interest. Then, review the list of candidate products provided in the JSON array. Each candidate has a name, an image URL, and a unique `random_key`.
+First, carefully analyze the reference images to identify the primary product of interest.
 
-Your goal is to return a JSON object with a single key, "ranked_product_keys", containing a list of the `random_key`s from the input, sorted in descending order of relevance to the product in the image. The most relevant product's key should appear first.
+Next, examine each candidate product's information and image. Compare it to the product in the reference images based on visual similarity, features, and likely function.
 
-Do not add any explanations or introductory text. The output must be a valid JSON object.
+Finally, you must return a JSON object with a single key: "ranked_keys". The value should be a list of the `random_key` strings from the candidate products, sorted in descending order of relevance. The most similar product's key should be first.
 
-Candidate products:
-{product_list_json}
+Do not include any explanations, introductory text, or markdown formatting. Your output must be only the valid JSON object.
+
+The user is interested in: {identified_product}

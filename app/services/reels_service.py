@@ -226,61 +226,89 @@ class ReelsService:
                 else:
                     logger.warning(f"Frame not found at {frame_path}, skipping product search for this frame.")
 
-            # This dictionary will hold all candidate products, deduplicated by random_key
-            candidate_products = {}
-            all_searched_urls = []
-
             if search_tasks:
                 logger.info(f"Running {len(search_tasks)} product searches in parallel...")
                 search_results = await asyncio.gather(*search_tasks)
 
+                all_products = []
+                all_searched_urls = []
+
                 for result in search_results:
                     if result and result.get("products"):
                         searched_url = result.get("searched_image_url")
+                        for p in result["products"]:
+                            p["image_url"] = searched_url  # Add image_url to each product from image search
+                        all_products.extend(result["products"])
                         if searched_url:
                             all_searched_urls.append(searched_url)
 
-                        # Take top 5 from each image search and add to candidates
+                analysis_result.product_info = all_products
+                analysis_result.searched_image_urls = all_searched_urls
+
+                # 7. Text search and filtering (if a Persian query is available)
+                filtered_text_products = []
+                if analysis_result.search_query_persian:
+                    logger.info(f"Persian search query found: '{analysis_result.search_query_persian}'. Starting text search.")
+                    text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
+
+                    if text_search_results:
+                        frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
+
+                        # Filter text search results with our async OpenRouter service
+                        relevant_text_keys, or_prompt_tokens, or_completion_tokens = await openrouter_service.filter_text_search_results(
+                            products=text_search_results,
+                            frame_paths=frame_paths,
+                            identified_product=analysis_result.identified_product
+                        )
+
+                        filtered_text_products = [p for p in text_search_results if p['random_key'] in relevant_text_keys]
+                        logger.info(f"OpenRouter filtered text search results to {len(filtered_text_products)} products.")
+
+                        # Aggregate tokens and cost for the text filtering call
+                        analysis_result.prompt_token_count += or_prompt_tokens
+                        analysis_result.response_token_count += or_completion_tokens
+                        total_cost += cost_service.calculate_cost(
+                            model_name=openrouter_service.model_name,
+                            prompt_tokens=or_prompt_tokens,
+                            response_tokens=or_completion_tokens
+                        )
+
+                # 8. Combine, deduplicate, and perform final ranking
+                candidate_products = {}
+
+                # Add filtered text products first
+                for p in filtered_text_products:
+                    p['source'] = 'text'
+                    candidate_products[p['random_key']] = p
+
+                # Add top 5 from each image search result, avoiding duplicates
+                for result in search_results:
+                     if result and result.get("products"):
                         for p in result["products"][:5]:
-                            p["image_url"] = searched_url
                             p['source'] = 'image'
                             if p['random_key'] not in candidate_products:
                                 candidate_products[p['random_key']] = p
 
-            analysis_result.searched_image_urls = all_searched_urls
+                product_list_to_rank = list(candidate_products.values())
 
-            # 7. Text search (if a Persian query is available)
-            if analysis_result.search_query_persian:
-                logger.info(f"Persian search query found: '{analysis_result.search_query_persian}'. Starting text search.")
-                text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
+                if product_list_to_rank:
+                    logger.info(f"Sending {len(product_list_to_rank)} unique products for final ranking.")
+                    frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
 
-                if text_search_results:
-                    logger.info(f"Found {len(text_search_results)} products from text search. Taking top 5.")
-                    # Take top 5 from text search and add to candidates
-                    for p in text_search_results[:5]:
-                        p['source'] = 'text'
-                        if p['random_key'] not in candidate_products:
-                            candidate_products[p['random_key']] = p
-            else:
-                logger.info("No Persian search query provided. Skipping text search.")
-
-            # 8. Unified final ranking
-            product_list_to_rank = list(candidate_products.values())
-
-            if product_list_to_rank:
-                logger.info(f"Sending {len(product_list_to_rank)} unique products for final ranking.")
-
-                # Use the best frame (rank 1) as the ground truth image
-                frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
-                ground_truth_image_path = next((p for p in frame_paths if p.name.endswith("_1.jpg")), None)
-
-                if ground_truth_image_path:
-                    # NOTE: The new FilterService does not return token counts or model name,
-                    # so cost calculation and token aggregation for this step are removed.
-                    # This is a trade-off for the simplified, single-stage architecture.
-                    ranked_keys = await filter_service.rank_products_with_openrouter(
+                    # Call the new, async, multimodal FilterService for the final ranking
+                    ranked_keys, rank_prompt_tokens, rank_completion_tokens, rank_model_name = await filter_service.rank_products_with_llm(
                         products=product_list_to_rank,
-                        ground_truth_image_path=ground_truth_image_path
+                        ground_truth_frame_paths=frame_paths,
+                        identified_product=analysis_result.identified_product
+                    )
+
+                    # Aggregate tokens and cost for the final ranking call
+                    analysis_result.prompt_token_count += rank_prompt_tokens
+                    analysis_result.response_token_count += rank_completion_tokens
+                    total_cost += cost_service.calculate_cost(
+                        model_name=rank_model_name,
+                        prompt_tokens=rank_prompt_tokens,
+                        response_tokens=rank_completion_tokens
                     )
 
                     # Create a map for quick lookups and preserve order from ranking
@@ -289,14 +317,16 @@ class ReelsService:
 
                     analysis_result.product_info = final_ranked_products
                     logger.info(f"Final ranking complete. Final product count: {len(final_ranked_products)}")
+
                 else:
-                    logger.warning("Could not find the rank 1 ground truth image. Skipping final ranking.")
                     analysis_result.product_info = []
+                    logger.info("No products left to send for final ranking.")
 
             else:
-                logger.info("No candidate products found to send for final ranking.")
+                logger.warning("No product searches were queued, and no Persian query was provided.")
                 analysis_result.product_info = []
 
+            logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
             return analysis_result
 
         except Exception as e:
