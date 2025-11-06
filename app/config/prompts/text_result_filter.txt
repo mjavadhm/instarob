@@ -13,9 +13,11 @@ Return a JSON object containing a single key "relevant_keys". The value must be 
 **Important Rules:**
 -   Focus purely on visual similarity. Do not rely heavily on the product names.
 -   The product in the list must look like the product in the reference images.
--   Your output must be ONLY a valid JSON object.
+-   **CRITICAL:** Your output MUST be ONLY a single, valid JSON object. Do not include any explanatory text, analysis, or markdown formatting before or after the JSON.
 
 Example format:
-{{
+```json
+{
   "relevant_keys": ["randomkey_1", "randomkey_2"]
-}}
+}
+```
