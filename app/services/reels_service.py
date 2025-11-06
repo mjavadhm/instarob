@@ -19,6 +19,7 @@ from app.models.frame_analysis import FrameAnalysis
 from app.services.product_service import product_service
 from app.services.filter_service import filter_service
 from app.services.cost_service import cost_service
+from app.services.openrouter_service import openrouter_service
 
 logger = get_logger()
 
@@ -236,6 +237,26 @@ class ReelsService:
 
                     # Search Torob by text
                     text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
+
+                    if text_search_results:
+                        # Get paths of saved frames
+                        frame_paths = []
+                        request_frame_dir = self.frames_dir / reel_in.request_id
+                        sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+                        for frame_info in analysis_result.best_frames:
+                            frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+                            frame_path = request_frame_dir / frame_filename
+                            if frame_path.exists():
+                                frame_paths.append(frame_path)
+
+                        # Filter text search results with OpenRouter
+                        relevant_text_keys = await openrouter_service.filter_text_search_results(
+                            products=text_search_results,
+                            frame_paths=frame_paths,
+                            identified_product=analysis_result.identified_product
+                        )
+                        text_search_results = [p for p in text_search_results if p['random_key'] in relevant_text_keys]
+                        logger.info(f"OpenRouter filtered text search results to {len(text_search_results)} products.")
 
                     # Combine and deduplicate image and text search results
                     combined_products = {}
