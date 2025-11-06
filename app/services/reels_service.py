@@ -250,13 +250,20 @@ class ReelsService:
                                 frame_paths.append(frame_path)
 
                         # Filter text search results with OpenRouter
-                        relevant_text_keys = await openrouter_service.filter_text_search_results(
+                        relevant_text_keys, or_prompt_tokens, or_completion_tokens = await openrouter_service.filter_text_search_results(
                             products=text_search_results,
                             frame_paths=frame_paths,
                             identified_product=analysis_result.identified_product
                         )
                         text_search_results = [p for p in text_search_results if p['random_key'] in relevant_text_keys]
                         logger.info(f"OpenRouter filtered text search results to {len(text_search_results)} products.")
+
+                        # Calculate cost for the OpenRouter call
+                        total_cost += cost_service.calculate_cost(
+                            model_name=openrouter_service.model_name,
+                            prompt_tokens=or_prompt_tokens,
+                            response_tokens=or_completion_tokens
+                        )
 
                     # Combine and deduplicate image and text search results
                     combined_products = {}

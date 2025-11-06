@@ -42,8 +42,10 @@ class OpenRouterService:
         products: List[Dict[str, Any]],
         frame_paths: List[Path],
         identified_product: str
-    ) -> List[str]:
+    ) -> Tuple[List[str], int, int]:
         try:
+            prompt_tokens = 0
+            completion_tokens = 0
             prompt_text = self.prompt_template.format(identified_product=identified_product)
 
             # Start with the main prompt and the reference video frames
@@ -97,15 +99,18 @@ class OpenRouterService:
             parsed_json = json.loads(response_text)
             relevant_keys = parsed_json.get("relevant_keys", [])
 
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
+
             if isinstance(relevant_keys, list) and all(isinstance(k, str) for k in relevant_keys):
                 logger.info(f"OpenRouter filtered down to {len(relevant_keys)} relevant products.")
-                return relevant_keys
+                return relevant_keys, prompt_tokens, completion_tokens
             else:
                 logger.warning(f"OpenRouter response key 'relevant_keys' was not a list of strings: {relevant_keys}")
-                return []
+                return [], prompt_tokens, completion_tokens
 
         except Exception as e:
             logger.error(f"An error occurred during OpenRouter filtering: {e}", exc_info=True)
-            return []
+            return [], 0, 0
 
 openrouter_service = OpenRouterService()
