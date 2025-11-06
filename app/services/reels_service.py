@@ -20,6 +20,7 @@ from app.services.product_service import product_service
 from app.services.filter_service import filter_service
 from app.services.cost_service import cost_service
 from app.services.openrouter_service import openrouter_service
+from app.core.utils import async_retry
 
 logger = get_logger()
 
@@ -50,6 +51,7 @@ class ReelsService:
             temperature=self.llm_config.get("temperature", 0.7)
         )
 
+    @async_retry()
     async def _download_video(self, url: str, request_id: str) -> Path:
         """Asynchronously downloads a video from a URL to a temporary local file."""
         path = urlparse(url).path
@@ -110,14 +112,23 @@ class ReelsService:
                 frame_paths.append(frame_path)
         return frame_paths
 
-    async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
-        """Orchestrates the main workflow: download, analyze, search, filter, and rank."""
-        video_path = None
-        video_file = None
-        request_start_time = time.time()
-        total_cost = 0.0
+    async def _task_a_analyze_caption_and_search_text(self, reel_in: ReelIn):
+        """Task A: Analyzes caption and performs text search."""
         try:
-            # 1. Download & Analyze Video with Gemini
+            query, p_tokens, r_tokens = await openrouter_service.analyze_caption(reel_in.caption)
+            cost = cost_service.calculate_cost(openrouter_service.caption_analysis_model, p_tokens, r_tokens)
+            if query:
+                results = await product_service.search_on_torob_by_text(query)
+                return results, p_tokens, r_tokens, cost
+            return None, p_tokens, r_tokens, cost
+        except Exception as e:
+            logger.error(f"Error in text pipeline (Task A): {e}", exc_info=True)
+            return None, 0, 0, 0.0
+
+    async def _task_b_process_video_and_search_images(self, reel_in: ReelIn):
+        """Task B: Downloads, analyzes video, extracts frames, and starts image searches."""
+        video_path, video_file = None, None
+        try:
             video_path = await self._download_video(str(reel_in.reel_url), reel_in.request_id)
             logger.info(f"Uploading '{video_path.name}' to Gemini File API...")
             video_file = await asyncio.to_thread(genai.upload_file, path=video_path, display_name=video_path.name)
@@ -128,7 +139,6 @@ class ReelsService:
                 if time.time() - start_time > 120: raise TimeoutError("File processing timed out.")
                 await asyncio.sleep(5)
                 video_file = await asyncio.to_thread(genai.get_file, video_file.name)
-
             if video_file.state.name == "FAILED": raise RuntimeError("File processing failed on the server.")
 
             model_name = self.llm_config.get("model", "gemini-1.5-flash")
@@ -137,103 +147,122 @@ class ReelsService:
 
             response = await model.generate_content_async([full_prompt, video_file], generation_config=self.generation_config)
 
-            prompt_token_count = (await model.count_tokens_async([full_prompt, video_file])).total_tokens
-            response_token_count = (await model.count_tokens_async(response.text)).total_tokens
-            total_cost += cost_service.calculate_cost(model_name, prompt_token_count, response_token_count)
-
             response_text = response.text.strip().removeprefix("```json").removesuffix("```")
             logger.info(f"Raw Gemini Response: {response_text}")
             analysis_data = json.loads(response_text)
             analysis_result = FrameAnalysis(**analysis_data)
-            analysis_result.prompt_token_count = prompt_token_count
-            analysis_result.response_token_count = response_token_count
 
-            # 2. Save Frames
+            p_tokens = (await model.count_tokens_async([full_prompt, video_file])).total_tokens
+            r_tokens = (await model.count_tokens_async(response.text)).total_tokens
+            cost = cost_service.calculate_cost(model_name, p_tokens, r_tokens)
+            analysis_result.prompt_token_count = p_tokens
+            analysis_result.response_token_count = r_tokens
+
             await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id)
-
-            # 3. Concurrent Product Searches (Image-based)
-            search_tasks = []
             frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
-            for frame_path in frame_paths:
-                task = product_service.search_product(frame_path=frame_path, text_prompt=analysis_result.identified_product)
-                search_tasks.append(task)
 
-            image_search_results = await asyncio.gather(*search_tasks)
+            search_tasks = [product_service.search_product(fp, analysis_result.identified_product) for fp in frame_paths]
+            image_search_task = asyncio.gather(*search_tasks)
 
-            # 4. Text Search and Filtering (if query exists)
+            return analysis_result, frame_paths, image_search_task, cost, video_path, video_file
+        except Exception as e:
+            logger.error(f"Error in video pipeline (Task B): {e}", exc_info=True)
+            # Cleanup resources if they were created before the error
+            if video_path and os.path.exists(video_path):
+                await asyncio.to_thread(os.remove, video_path)
+            if video_file:
+                await asyncio.to_thread(genai.delete_file, video_file.name)
+            raise # Re-raise to let the orchestrator know this path failed
+
+    async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
+        """Orchestrates the new parallel processing pipeline."""
+        request_start_time = time.time()
+        video_path, video_file = None, None
+        final_analysis = FrameAnalysis() # Create a default result object
+
+        try:
+            # 1. Start Text and Video pipelines concurrently
+            task_a = self._task_a_analyze_caption_and_search_text(reel_in)
+            task_b = self._task_b_process_video_and_search_images(reel_in)
+
+            results = await asyncio.gather(task_a, task_b, return_exceptions=True)
+
+            # Unpack results and handle potential errors
+            text_result, video_result = results
+
+            if isinstance(text_result, Exception):
+                logger.error("Text analysis task failed.", exc_info=text_result)
+                text_search_results, txt_p, txt_r, txt_c = [], 0, 0, 0.0
+            else:
+                text_search_results, txt_p, txt_r, txt_c = text_result
+
+            if isinstance(video_result, Exception):
+                logger.error("Video processing task failed.", exc_info=video_result)
+                raise RuntimeError("Core video processing pipeline failed, cannot continue.")
+            else:
+                final_analysis, frame_paths, image_search_task, vid_c, video_path, video_file = video_result
+
+            final_analysis.prompt_token_count += txt_p
+            final_analysis.response_token_count += txt_r
+            total_cost = txt_c + vid_c
+
+            # 2. Synchronization Point 1: Filter text results
             filtered_text_products = []
-            if analysis_result.search_query_persian:
-                text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
-                if text_search_results:
-                    relevant_keys, or_prompt, or_completion = await openrouter_service.filter_text_search_results(
-                        products=text_search_results,
-                        frame_paths=frame_paths,
-                        identified_product=analysis_result.identified_product
-                    )
-                    # Sort the filtered products to maintain the order from the LLM and take the top 5
-                    relevant_keys_map = {key: i for i, key in enumerate(relevant_keys)}
-                    sorted_filtered_products = sorted(
-                        [p for p in text_search_results if p['random_key'] in relevant_keys_map],
-                        key=lambda p: relevant_keys_map[p['random_key']]
-                    )
-                    filtered_text_products = sorted_filtered_products[:5]
-                    logger.info(f"OpenRouter filtered text search to {len(relevant_keys)} products, taking top {len(filtered_text_products)}.")
-                    analysis_result.prompt_token_count += or_prompt
-                    analysis_result.response_token_count += or_completion
-                    total_cost += cost_service.calculate_cost(openrouter_service.model_name, or_prompt, or_completion)
+            if text_search_results and frame_paths:
+                keys, p, r = await openrouter_service.filter_text_search_results(
+                    text_search_results, frame_paths, final_analysis.identified_product
+                )
+                keys_map = {key: i for i, key in enumerate(keys)}
+                sorted_prods = sorted([p for p in text_search_results if p['random_key'] in keys_map], key=lambda p: keys_map[p['random_key']])
+                filtered_text_products = sorted_prods[:5]
 
-            # 5. Combine, Deduplicate, and Final Rank
-            candidate_products = {}
-            for p in filtered_text_products:
-                p['source'] = 'text'
-                candidate_products[p['random_key']] = p
+                final_analysis.prompt_token_count += p
+                final_analysis.response_token_count += r
+                total_cost += cost_service.calculate_cost(openrouter_service.text_filter_model, p, r)
 
-            all_searched_urls = []
+            # 3. Synchronization Point 2: Wait for image searches to complete
+            image_search_results = await image_search_task
+
+            # 4. Combine, Deduplicate, and Final Rank
+            candidate_products = {p['random_key']: {**p, 'source': 'text'} for p in filtered_text_products}
+
+            urls = []
             for result in image_search_results:
                 if result and result.get("products"):
-                    searched_url = result.get("searched_image_url")
-                    if searched_url: all_searched_urls.append(searched_url)
+                    url = result.get("searched_image_url")
+                    if url: urls.append(url)
                     for p in result["products"][:5]:
-                        p['source'] = 'image'
-                        p['image_url'] = searched_url
                         if p['random_key'] not in candidate_products:
-                            candidate_products[p['random_key']] = p
+                            candidate_products[p['random_key']] = {**p, 'source': 'image', 'image_url': url}
+            final_analysis.searched_image_urls = list(set(urls))
 
-            analysis_result.searched_image_urls = list(set(all_searched_urls))
-
-            product_list_to_rank = list(candidate_products.values())
-            if product_list_to_rank:
-                logger.info(f"Sending {len(product_list_to_rank)} unique products for final ranking.")
-                ranked_keys, rank_prompt, rank_completion, rank_model = await filter_service.rank_products_with_llm(
-                    products=product_list_to_rank,
-                    ground_truth_frame_paths=frame_paths,
-                    identified_product=analysis_result.identified_product
+            product_list = list(candidate_products.values())
+            if product_list:
+                keys, p, r, model = await filter_service.rank_products_with_llm(
+                    product_list, frame_paths, final_analysis.identified_product
                 )
+                final_analysis.prompt_token_count += p
+                final_analysis.response_token_count += r
+                total_cost += cost_service.calculate_cost(model, p, r)
 
-                analysis_result.prompt_token_count += rank_prompt
-                analysis_result.response_token_count += rank_completion
-                total_cost += cost_service.calculate_cost(rank_model, rank_prompt, rank_completion)
+                prod_map = {p['random_key']: p for p in product_list}
+                final_analysis.product_info = [prod_map[key] for key in keys if key in prod_map]
 
-                product_map = {p['random_key']: p for p in product_list_to_rank}
-                final_ranked_products = [product_map[key] for key in ranked_keys if key in product_map]
-                analysis_result.product_info = final_ranked_products
-                logger.info(f"Final ranking complete. Count: {len(final_ranked_products)}")
-            else:
-                analysis_result.product_info = []
-                logger.info("No products left for final ranking.")
+            return final_analysis
 
-            return analysis_result
         except Exception as e:
-            logger.error(f"An error occurred during video analysis: {e}", exc_info=True)
-            raise RuntimeError("Failed to process and analyze the video.")
+            logger.error(f"An error occurred during the main analysis workflow: {e}", exc_info=True)
+            # Ensure final_analysis is returned even on failure
+            return final_analysis
         finally:
             if video_path and os.path.exists(video_path):
                 await asyncio.to_thread(os.remove, video_path)
             if video_file:
                 await asyncio.to_thread(genai.delete_file, video_file.name)
-            request_duration = time.time() - request_start_time
-            logger.info(f"Request finished. Duration: {request_duration:.2f}s, Total Cost: ${total_cost:.6f}")
-            logger.info(f"Final token counts. Prompt: {analysis_result.prompt_token_count}, Response: {analysis_result.response_token_count}")
+
+            duration = time.time() - request_start_time
+            logger.info(f"Request finished. Duration: {duration:.2f}s, Total Cost: ${total_cost:.6f}")
+            logger.info(f"Final token counts. Prompt: {final_analysis.prompt_token_count}, Response: {final_analysis.response_token_count}")
 
     def zip_frames(self, request_ids: List[str], zip_filename: str) -> Path:
         """Zips the frames for a given list of request IDs."""

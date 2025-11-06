@@ -6,6 +6,7 @@ import base64
 from httpx_socks import AsyncProxyTransport
 
 from app.core.logging import get_logger
+from app.core.utils import async_retry
 
 logger = get_logger()
 
@@ -68,37 +69,31 @@ class ProductService:
             logger.error(f"An error occurred during async base64 conversion: {e}", exc_info=True)
             return None
 
+    @async_retry()
     async def upload_to_torob(self, image_base64: str) -> Optional[str]:
         """Uploads a base64 encoded image to Torob's image upload API."""
         torob_url = "https://api.torob.com/v4/base-product/search-image-upload/"
         transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
-        try:
-            image_data = base64.b64decode(image_base64)
-            files = {'img': ('image.jpg', image_data, 'image/jpeg')}
+        image_data = base64.b64decode(image_base64)
+        files = {'img': ('image.jpg', image_data, 'image/jpeg')}
 
-            async with httpx.AsyncClient(transport=transport) as client:
-                logger.info("Uploading image to Torob...")
-                response = await client.post(torob_url, files=files, timeout=40)
-                response.raise_for_status()
+        async with httpx.AsyncClient(transport=transport) as client:
+            logger.info("Uploading image to Torob...")
+            response = await client.post(torob_url, files=files, timeout=40)
+            response.raise_for_status()
 
-                response_data = response.json()
-                image_url = response_data.get("image_url")
+            response_data = response.json()
+            image_url = response_data.get("image_url")
 
-                if image_url:
-                    logger.info(f"Successfully uploaded image to Torob. Image URL: {image_url}")
-                    return image_url
-                else:
-                    logger.error(f"Torob upload API did not return an 'image_url'. Response: {response_data}")
-                    return None
+            if image_url:
+                logger.info(f"Successfully uploaded image to Torob. Image URL: {image_url}")
+                return image_url
+            else:
+                logger.error(f"Torob upload API did not return an 'image_url'. Response: {response_data}")
+                return None
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error while uploading to Torob: {e.response.status_code} - {e.response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during Torob upload: {e}", exc_info=True)
-            return None
-
+    @async_retry()
     async def search_on_torob(self, image_url: str) -> Optional[Dict[str, Any]]:
         """
         Searches Torob by image URL and returns all parsed product information,
@@ -107,81 +102,66 @@ class ProductService:
         torob_url = f"https://api.torob.com/v4/base-product/search-by-image/?image_url={image_url}"
         transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
-        try:
-            async with httpx.AsyncClient(transport=transport) as client:
-                logger.info(f"Searching on Torob with image URL: {image_url}")
-                response = await client.get(torob_url, timeout=40)
-                response.raise_for_status()
+        async with httpx.AsyncClient(transport=transport) as client:
+            logger.info(f"Searching on Torob with image URL: {image_url}")
+            response = await client.get(torob_url, timeout=40)
+            response.raise_for_status()
 
-                results = response.json()
+            results = response.json()
 
-                if results.get("results") and len(results["results"]) > 0:
-                    all_results = results["results"]
-                    products_info = [
-                        {
-                            "name": result.get("name1"),
-                            "link": f"https://torob.com{result.get('web_client_absolute_url')}",
-                            "random_key": result.get("random_key"),
-                            "rank": i + 1  # Add rank based on position
-                        }
-                        for i, result in enumerate(all_results)
-                    ]
-                    logger.info(f"Successfully found {len(products_info)} products on Torob.")
-
-                    return {
-                        "products": products_info,
-                        "searched_image_url": results.get("uploaded_image_url")
+            if results.get("results") and len(results["results"]) > 0:
+                all_results = results["results"]
+                products_info = [
+                    {
+                        "name": result.get("name1"),
+                        "link": f"https://torob.com{result.get('web_client_absolute_url')}",
+                        "random_key": result.get("random_key"),
+                        "rank": i + 1  # Add rank based on position
                     }
-                else:
-                    logger.warning("No products found on Torob for the given image.")
-                    return None
+                    for i, result in enumerate(all_results)
+                ]
+                logger.info(f"Successfully found {len(products_info)} products on Torob.")
 
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error during Torob search: {e.response.status_code} - {e.response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during Torob search: {e}", exc_info=True)
-            return None
+                return {
+                    "products": products_info,
+                    "searched_image_url": results.get("uploaded_image_url")
+                }
+            else:
+                logger.warning("No products found on Torob for the given image.")
+                return None
 
+    @async_retry()
     async def search_on_torob_by_text(self, query: str) -> Optional[List[Dict[str, Any]]]:
         """Searches Torob by a text query and returns up to 10 non-advertisement products, including their image URLs."""
         search_url = f"https://api.torob.com/v4/base-product/search/?q={query}&size=100&page=1"
         transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
-        try:
-            async with httpx.AsyncClient(transport=transport) as client:
-                logger.info(f"Searching on Torob with text query: '{query}'")
-                response = await client.get(search_url, timeout=40)
-                response.raise_for_status()
+        async with httpx.AsyncClient(transport=transport) as client:
+            logger.info(f"Searching on Torob with text query: '{query}'")
+            response = await client.get(search_url, timeout=40)
+            response.raise_for_status()
 
-                data = response.json()
-                results = data.get("results", [])
+            data = response.json()
+            results = data.get("results", [])
 
-                if not results:
-                    logger.warning(f"No text search results found on Torob for query: '{query}'")
-                    return None
+            if not results:
+                logger.warning(f"No text search results found on Torob for query: '{query}'")
+                return None
 
-                products_info = []
-                for result in results:
-                    if not result.get("is_adv"):
-                        products_info.append({
-                            "name": result.get("name1"),
-                            "link": f"https://torob.com{result.get('web_client_absolute_url')}",
-                            "random_key": result.get("random_key"),
-                            "image_url": result.get("image_url")
-                        })
-                        if len(products_info) >= 10:
-                            break
+            products_info = []
+            for result in results:
+                if not result.get("is_adv"):
+                    products_info.append({
+                        "name": result.get("name1"),
+                        "link": f"https://torob.com{result.get('web_client_absolute_url')}",
+                        "random_key": result.get("random_key"),
+                        "image_url": result.get("image_url")
+                    })
+                    if len(products_info) >= 10:
+                        break
 
-                logger.info(f"Found {len(products_info)} non-advertisement products from text search.")
-                return products_info
-
-        except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error during Torob text search: {e.response.status_code} - {e.response.text}")
-            return None
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during Torob text search: {e}", exc_info=True)
-            return None
+            logger.info(f"Found {len(products_info)} non-advertisement products from text search.")
+            return products_info
 
     async def search_product(self, frame_path: Path, text_prompt: str) -> Optional[Dict[str, Any]]:
         """

@@ -1,0 +1,42 @@
+You are an intelligent shopping assistant. Your task is to analyze the user's caption and identify the main product being discussed.
+
+Based on the caption, extract the product name and return a concise, relevant search query in Persian for an e-commerce platform like Torob.
+
+**Input Caption:**
+"{caption}"
+
+**Instructions:**
+1.  Read the caption carefully.
+2.  Identify the primary product mentioned or implied.
+3.  If a clear product exists, generate a practical Persian search query for it.
+4.  If no specific product is mentioned or the caption is irrelevant, return null.
+5.  Respond with a single JSON object containing one key: "search_query_persian".
+
+**Example 1:**
+*   **Caption:** "اینم از بهترین رنگ این رژ لب که به همه رنگ پوستی میاد"
+*   **Response:**
+    ```json
+    {
+      "search_query_persian": "رژ لب"
+    }
+    ```
+
+**Example 2:**
+*   **Caption:** "دخترا این کیف کمری رو ببینید چه خوشگله! هم واسه روزمره خوبه هم مهمونی"
+*   **Response:**
+    ```json
+    {
+      "search_query_persian": "کیف کمری"
+    }
+    ```
+
+**Example 3:**
+*   **Caption:** "روز خوبی داشته باشید"
+*   **Response:**
+    ```json
+    {
+      "search_query_persian": null
+    }
+    ```
+
+**Your Response:**
