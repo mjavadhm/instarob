@@ -70,6 +70,7 @@ class OpenRouterService:
             analysis_result = CaptionAnalysis(**parsed_json)
 
             prompt_tokens = completion.usage.prompt_tokens
+            print(str(completion.usage))
             completion_tokens = completion.usage.completion_tokens
 
             logger.info(f"Caption analysis successful. Query: '{analysis_result.search_query_persian}', Confidence: {analysis_result.confidence}")
@@ -133,7 +134,7 @@ class OpenRouterService:
 
             parsed_json = json.loads(response_text)
             relevant_keys = parsed_json.get("relevant_keys", [])
-
+            print(str(completion.usage))
             prompt_tokens = completion.usage.prompt_tokens
             completion_tokens = completion.usage.completion_tokens
 
