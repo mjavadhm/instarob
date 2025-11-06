@@ -1,9 +1,10 @@
 import yaml
 import json
+import httpx
+import os
+import base64
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-import google.generativeai as genai
-from google.generativeai.types import GenerateContentResponse
+from typing import List, Dict, Any, Optional
 
 from app.core.logging import get_logger
 
@@ -11,103 +12,136 @@ logger = get_logger()
 
 class FilterService:
     def __init__(self):
-        # Load LLM and prompt configuration
+        # Load LLM and prompt configuration from the correct section for OpenRouter
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
         with open(config_path, "r") as f:
-            self.llm_config = yaml.safe_load(f).get("product_filter", {})
+            self.llm_config = yaml.safe_load(f).get("final_ranking_openrouter", {})
 
-        prompt_file = self.llm_config.get("prompt_file", "prompts/product_filter.txt")
+        prompt_file = self.llm_config.get("prompt_file", "prompts/final_ranking.txt")
         prompt_file_path = prompt_dir.parent / "config" / prompt_file
 
         with open(prompt_file_path, "r") as f:
             self.prompt_template = f.read()
 
-        model_name = self.llm_config.get("model", "gemini-1.5-flash")
-        self.model = genai.GenerativeModel(model_name)
-        logger.info(f"FilterService initialized. Model: {model_name}")
+        self.model_name = self.llm_config.get("model", "google/gemini-flash-1.5-pro-latest")
+        self.api_key = os.getenv("OPENROUTER_API_KEY")
+        self.api_url = "https://openrouter.ai/api/v1/chat/completions"
 
-        # Prepare generation config
-        self.generation_config = genai.types.GenerationConfig(
-            temperature=self.llm_config.get("temperature", 0.7)
+        # Setup an async HTTP client
+        self.client = httpx.AsyncClient(
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json"
+            }
+        )
+        logger.info(f"FilterService initialized for OpenRouter. Model: {self.model_name}")
+
+    async def _encode_image_to_base64(self, image_path: Path) -> Optional[str]:
+        """Encodes an image file to a base64 string."""
+        try:
+            if not image_path.exists():
+                logger.error(f"Image file not found at {image_path}")
+                return None
+            with open(image_path, "rb") as image_file:
+                return base64.b64encode(image_file.read()).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Error encoding image {image_path} to base64: {e}", exc_info=True)
+            return None
+
+    async def rank_products_with_openrouter(
+        self,
+        products: List[Dict[str, Any]],
+        ground_truth_image_path: Path
+    ) -> List[str]:
+        """
+        Uses an OpenRouter multimodal model to rank products based on a ground truth image.
+
+        Args:
+            products: A list of candidate products (deduplicated).
+            ground_truth_image_path: The file path to the main video frame for visual comparison.
+
+        Returns:
+            A list of 'random_key's, sorted by the model's ranking.
+        """
+        if not self.api_key:
+            logger.error("OPENROUTER_API_KEY not set. Cannot proceed with ranking.")
+            return []
+
+        if not products:
+            logger.warning("No products provided to rank.")
+            return []
+
+        base64_image = await self._encode_image_to_base64(ground_truth_image_path)
+        if not base64_image:
+            logger.error("Failed to encode ground truth image. Aborting ranking.")
+            return []
+
+        # Prepare the product list for the prompt
+        product_list_for_prompt = []
+        for p in products:
+            product_data = {
+                "name": p.get("name"),
+                "random_key": p.get("random_key"),
+                "image_url": p.get("image_url")
+            }
+            product_list_for_prompt.append(product_data)
+        product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
+
+        prompt = self.prompt_template.format(
+            product_list_json=product_list_json
         )
 
-    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str, product_description: Optional[str]) -> Tuple[List[str], int, int, str]:
-        """
-        Uses an LLM to filter a list of products based on a search query and identified product.
-        Returns a tuple containing the list of 'random_key's, prompt tokens, response tokens, and the model name used.
-        """
-        model_name = self.llm_config.get("model", "gemini-1.5-flash")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/jpeg;base64,{base64_image}"
+                        }
+                    }
+                ]
+            }
+        ]
+
+        payload = {
+            "model": self.model_name,
+            "messages": messages,
+            "response_format": {"type": "json_object"},
+            "stream": False
+        }
+
         try:
-            prompt_tokens = 0
-            response_tokens = 0
-            if not products:
-                return [], prompt_tokens, response_tokens, model_name
+            logger.info(f"Sending request to OpenRouter for final ranking. Products count: {len(products)}")
+            response = await self.client.post(self.api_url, json=payload, timeout=120)
+            response.raise_for_status()
 
-            product_list_for_prompt = []
-            for p in products:
-                product_data = {
-                    "name": p.get("name"),
-                    "random_key": p.get("random_key"),
-                    "source": p.get("source", "unknown")
-                }
-                if "rank" in p:
-                    product_data["rank"] = p["rank"]
-                product_list_for_prompt.append(product_data)
-            product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
+            response_data = response.json()
+            response_text = response_data['choices'][0]['message']['content'].strip()
+            logger.info(f"Raw OpenRouter ranking response: {response_text}")
 
-            prompt = self.prompt_template.format(
-                search_query=search_query,
-                identified_product=identified_product,
-                product_description=product_description or identified_product,
-                product_list_json=product_list_json
-            )
-
-            # Calculate prompt tokens
-            prompt_token_count_result = await self.model.count_tokens_async(prompt)
-            prompt_tokens = prompt_token_count_result.total_tokens
-            logger.info(f"Filter prompt token count: {prompt_tokens}")
-
-            logger.info(f"Sending request to LLM to filter products for query: '{search_query}'")
-            response = await self.model.generate_content_async(prompt, generation_config=self.generation_config)
-
-            # Check for blocked responses or missing content
-            if not response.parts:
-                logger.error(f"LLM filter response was blocked or empty. Feedback: {response.prompt_feedback}")
-                return [], prompt_tokens, response_tokens, model_name
-
-            # Log raw response for debugging
-            response_text = response.text.strip()
-            logger.info(f"Raw LLM filter response: {response_text}")
-
-            # Calculate response tokens
-            response_token_count_result = await self.model.count_tokens_async(response_text)
-            response_tokens = response_token_count_result.total_tokens
-            logger.info(f"Filter response token count: {response_tokens}")
-
-            # Clean and parse the JSON object
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-
-            logger.info("Parsing JSON object response from LLM filter.")
             parsed_json = json.loads(response_text)
+            ranked_keys = parsed_json.get("ranked_product_keys", [])
 
-            filtered_keys = parsed_json.get("relevant_keys", [])
-
-            if isinstance(filtered_keys, list) and all(isinstance(k, str) for k in filtered_keys):
-                logger.info(f"LLM filtered down to {len(filtered_keys)} relevant products.")
-                return filtered_keys, prompt_tokens, response_tokens, model_name
+            if isinstance(ranked_keys, list) and all(isinstance(k, str) for k in ranked_keys):
+                logger.info(f"OpenRouter ranked {len(ranked_keys)} products successfully.")
+                return ranked_keys
             else:
-                logger.warning(f"LLM response key 'relevant_keys' was not a list of strings: {filtered_keys}")
-                return [], prompt_tokens, response_tokens, model_name
+                logger.warning(f"OpenRouter response key 'ranked_product_keys' was not a list of strings: {ranked_keys}")
+                return []
 
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error occurred while calling OpenRouter: {e.response.status_code} {e.response.text}", exc_info=True)
+            return []
         except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed for LLM filter response: {e}", exc_info=True)
-            return [], prompt_tokens, response_tokens, model_name
+            logger.error(f"JSON parsing failed for OpenRouter response: {e}", exc_info=True)
+            return []
         except Exception as e:
-            logger.error(f"An error occurred during LLM product filtering: {e}", exc_info=True)
-            return [], prompt_tokens, response_tokens, model_name
+            logger.error(f"An unexpected error occurred during OpenRouter ranking: {e}", exc_info=True)
+            return []
 
+# Singleton instance
 filter_service = FilterService()
