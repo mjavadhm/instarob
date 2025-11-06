@@ -2,7 +2,9 @@ product_search:
   model: gemini-2.5-flash
   prompt_file: "prompts/product_search.txt"
   temperature: 0.3
+  thinking_budget: 0
 
 product_filter:
-  model: gemini-1.5-flash
+  model: gemini-2.5-flash
   prompt_file: "prompts/product_filter.txt"
+  thinking_budget: 0

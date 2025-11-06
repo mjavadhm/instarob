@@ -18,6 +18,7 @@ from app.models.reel_in import ReelIn
 from app.models.frame_analysis import FrameAnalysis
 from app.services.product_service import product_service
 from app.services.filter_service import filter_service
+from app.services.cost_service import cost_service
 
 logger = get_logger()
 
@@ -42,6 +43,12 @@ class ReelsService:
         self.frames_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
+
+        # Prepare generation config
+        self.generation_config = genai.types.GenerationConfig(
+            temperature=self.llm_config.get("temperature", 0.7),
+            thinking_budget=self.llm_config.get("thinking_budget", 0)
+        )
 
     async def _download_video(self, url: str, request_id: str) -> Path:
         """Asynchronously downloads a video from a URL to a temporary local file."""
@@ -110,6 +117,8 @@ class ReelsService:
         """
         video_path = None
         video_file = None
+        request_start_time = time.time()
+        total_cost = 0.0
         try:
             # 1. Download the video
             video_path = await self._download_video(str(reel_in.reel_url), reel_in.request_id)
@@ -147,12 +156,22 @@ class ReelsService:
             logger.info(f"Prompt token count: {prompt_token_count}")
 
             logger.info(f"Sending request to Gemini model '{model_name}'...")
-            response = await model.generate_content_async([full_prompt, video_file])
+            response = await model.generate_content_async(
+                [full_prompt, video_file],
+                generation_config=self.generation_config
+            )
 
             # Log token usage for the response
             response_token_count_result = await model.count_tokens_async(response.text)
             response_token_count = response_token_count_result.total_tokens
             logger.info(f"Response token count: {response_token_count}")
+
+            # Calculate cost for the first LLM call
+            total_cost += cost_service.calculate_cost(
+                model_name=model_name,
+                prompt_tokens=prompt_token_count,
+                response_tokens=response_token_count
+            )
 
             # 3. Parse the response
             response_text = response.text.strip()
@@ -238,11 +257,18 @@ class ReelsService:
                     logger.info(f"Combined list of {len(product_list_to_filter)} unique products (tagged by source) will be sent to LLM for filtering.")
 
                     
-                    relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
+                    relevant_keys, filter_prompt_tokens, filter_response_tokens, filter_model_name = await filter_service.filter_products_with_llm(
                         products=product_list_to_filter,
                         search_query=analysis_result.search_query_persian,
                         identified_product=analysis_result.identified_product,
                         product_description=analysis_result.product_description
+                    )
+
+                    # Calculate cost for the filter LLM call
+                    total_cost += cost_service.calculate_cost(
+                        model_name=filter_model_name,
+                        prompt_tokens=filter_prompt_tokens,
+                        response_tokens=filter_response_tokens
                     )
 
                     # Aggregate token counts
@@ -276,6 +302,9 @@ class ReelsService:
             if video_file:
                 logger.info(f"Deleting uploaded file '{video_file.display_name}' from Gemini in a separate thread.")
                 await asyncio.to_thread(genai.delete_file, video_file.name)
+
+            request_duration = time.time() - request_start_time
+            logger.info(f"Request finished. Total duration: {request_duration:.2f}s, Total LLM cost: ${total_cost:.6f}")
 
     def zip_frames(self, request_ids: List[str], zip_filename: str) -> Path:
         """Zips the frames for a given list of request IDs."""
