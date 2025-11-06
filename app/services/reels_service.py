@@ -46,8 +46,7 @@ class ReelsService:
 
         # Prepare generation config
         self.generation_config = genai.types.GenerationConfig(
-            temperature=self.llm_config.get("temperature", 0.7),
-            thinking_budget=self.llm_config.get("thinking_budget", 0)
+            temperature=self.llm_config.get("temperature", 0.7)
         )
 
     async def _download_video(self, url: str, request_id: str) -> Path:

@@ -29,8 +29,7 @@ class FilterService:
 
         # Prepare generation config
         self.generation_config = genai.types.GenerationConfig(
-            temperature=self.llm_config.get("temperature", 0.7),
-            thinking_budget=self.llm_config.get("thinking_budget", 0)
+            temperature=self.llm_config.get("temperature", 0.7)
         )
 
     async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str, product_description: Optional[str]) -> Tuple[List[str], int, int, str]:
