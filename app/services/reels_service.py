@@ -138,13 +138,16 @@ class ReelsService:
             model_name = self.llm_config.get("model", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
 
+            # Create the full prompt including the caption
+            full_prompt = f"{self.prompt}\n\nVideo Caption: {reel_in.caption}"
+
             # Log token usage for the prompt
-            prompt_token_count_result = await model.count_tokens_async([self.prompt, video_file])
+            prompt_token_count_result = await model.count_tokens_async([full_prompt, video_file])
             prompt_token_count = prompt_token_count_result.total_tokens
             logger.info(f"Prompt token count: {prompt_token_count}")
 
             logger.info(f"Sending request to Gemini model '{model_name}'...")
-            response = await model.generate_content_async([self.prompt, video_file])
+            response = await model.generate_content_async([full_prompt, video_file])
 
             # Log token usage for the response
             response_token_count_result = await model.count_tokens_async(response.text)

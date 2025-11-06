@@ -15,9 +15,11 @@ class FilterService:
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
         with open(config_path, "r") as f:
-            self.llm_config = yaml.safe_load(f).get("product_search", {})
+            self.llm_config = yaml.safe_load(f).get("product_filter", {})
 
-        prompt_file_path = prompt_dir / "prompts/product_filter.txt"
+        prompt_file = self.llm_config.get("prompt_file", "prompts/product_filter.txt")
+        prompt_file_path = prompt_dir.parent / "config" / prompt_file
+
         with open(prompt_file_path, "r") as f:
             self.prompt_template = f.read()
 
