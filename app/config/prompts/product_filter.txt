@@ -22,7 +22,8 @@ Return a JSON object containing a single key "relevant_keys". The value must be 
 
 **Goal:** Find products that match the **"Product Description"** and **"Product Identified (Name)"**.
 
-The output must be a valid JSON object and nothing else.
+the products should be ranked(first one is the most similar based on the name and image)
+You'r part of a automated system so the output must be ONLY A VALID JSON object and nothing else.
 
 Example format:
 {{
