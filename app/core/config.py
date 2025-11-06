@@ -5,6 +5,7 @@ class Settings(BaseSettings):
     REEL_KEYS_COUNT: int = 1
     GEMINI_API_KEY: str = "YOUR_API_KEY_HERE"
     OPENROUTER_API_KEY: str = "YOUR_API_KEY_HERE"
+    EDEN_API_KEY: str = "YOUR_API_KEY_HERE"
 
     class Config:
         env_file = ".env"
