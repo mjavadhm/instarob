@@ -44,10 +44,16 @@ class FilterService:
             if not products:
                 return [], prompt_tokens, response_tokens, model_name
 
-            product_list_for_prompt = [
-                {"name": p.get("name"), "random_key": p.get("random_key"), "source": p.get("source", "unknown")} 
-                for p in products
-            ]
+            product_list_for_prompt = []
+            for p in products:
+                product_data = {
+                    "name": p.get("name"),
+                    "random_key": p.get("random_key"),
+                    "source": p.get("source", "unknown")
+                }
+                if "rank" in p:
+                    product_data["rank"] = p["rank"]
+                product_list_for_prompt.append(product_data)
             product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
 
             prompt = self.prompt_template.format(

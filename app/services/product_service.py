@@ -121,9 +121,10 @@ class ProductService:
                         {
                             "name": result.get("name1"),
                             "link": f"https://torob.com{result.get('web_client_absolute_url')}",
-                            "random_key": result.get("random_key")
+                            "random_key": result.get("random_key"),
+                            "rank": i + 1  # Add rank based on position
                         }
-                        for result in all_results
+                        for i, result in enumerate(all_results)
                     ]
                     logger.info(f"Successfully found {len(products_info)} products on Torob.")
 

@@ -7,7 +7,7 @@ You are an intelligent product filtering agent. Your task is to analyze a list o
 4.  **Product List (JSON):**
 {product_list_json}
 
-(Products tagged with `"source": "image"` were found using visual search. Products tagged with `"source": "text"` were found using the text query.)
+(Products tagged with `"source": "image"` were found using visual search. These products may have a "rank" field, where a lower number indicates a better visual match. Multiple products might have the same rank (e.g., rank 1) if multiple images were searched; consider them equally strong matches. Products tagged with `"source": "text"` were found using the text query and do not have a rank.)
 
 **Task:**
 Return a JSON object containing a single key "relevant_keys". The value must be a JSON array of "random_key"s for products that are highly relevant.
