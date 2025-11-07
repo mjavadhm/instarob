@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.utils import async_retry
 
 logger = get_logger()
 
@@ -50,6 +51,7 @@ class FilterService:
             logger.error(f"Failed to download or encode image from {url}: {e}", exc_info=True)
             return None
 
+    @async_retry()
     async def rank_products_with_llm(
         self,
         products: List[Dict[str, Any]],
