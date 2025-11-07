@@ -16,3 +16,6 @@
 'google/gemini-2.5-pro':
   input_cost_per_million_tokens: 1.25
   output_cost_per_million_tokens: 10.00
+'openai/gpt-4.1':
+  input_cost_per_million_tokens: 2.00
+  output_cost_per_million_tokens: 8.00

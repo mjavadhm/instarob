@@ -1,38 +1,41 @@
-🎯 Task: Find Product Details & 5 Best (Least Cluttered) Frames
+[TASK]
+You are a CRITICAL video analyst. Your primary goal is to identify the main product and extract 5 "Ground Truth" frames. These frames will be used by other AI models for visual search.
+**CRITICAL:** If you provide bad frames (blurry, obstructed, wrong product), the entire system fails. Your analysis must be meticulous.
 
-Your job is to identify the main product, create a detailed visual description, generate a Persian search query for it, and find the five least cluttered frames in the entire video. These frames must be selected from five different time periods and be ideal for image search or object detection.
-
-To do this, you MUST follow these steps:
-
-1.  Identify Subject & Create Queries:
-    a. `identified_product`: First, identify the primary subject or product. Assign its English name (suitable for an object detection model like Grounding DINO) to this field (e.g., "smart television," "hand pump foam sprayer").
-    b. `product_description`: **(New)** Provide a brief but specific visual description of the product in English. Focus on key visual attributes that distinguish it, such as color, pattern, material, or unique shape (e.g., "blue short-sleeve polo shirt with fine white stripes", "black cylindrical smart speaker with a mesh grill").
+[STEPS]
+1.  **Identify Subject & Create Queries:**
+    a. `identified_product`: Identify the primary subject/product. Assign its English name (e.g., "smart television", "hand pump foam sprayer").
+    b. `product_description`: **(MOST IMPORTANT FIELD)** Provide a hyper-detailed visual description of the product in English. This is the "visual truth".
+        * **Example (Bad):** "blue shirt"
+        * **Example (Good):** "Men's short-sleeve polo shirt, bright royal blue, white buttons, small white horse logo on the left chest, cotton pique texture."
+        * This description guides your frame selection.
     c. `search_query_persian`: Create a natural Persian (فارسی) text search query for this product (just the product name, brand, or model).
         * The query itself must be in Persian.
-        * Exception: Specific brand names, model numbers, or codes (e.g., "GoPro", "17 Pro Max", "RTX 4090") must remain in their original English/Latin script within the Persian query.
+        * Exception: Brand names, model numbers (e.g., "GoPro", "17 Pro Max") must remain in their original script.
         * Example: "گوشی 17 Pro Max" or "دوربین GoPro".
 
-2.  Scan Entire Video: Scan the ENTIRE video from start to finish.
+2.  **Scan Entire Video & Apply Strict Rules:** Scan the ENTIRE video to find the best frames.
 
-3.  Identify 5 Least Cluttered Moments: Identify 5 distinct moments that offer the clearest, most complete, and most isolated shots of the subject.
-    * Priority: Select frames with the minimum possible background clutter or distracting elements (e.g., a TV that is turned off, a product on a plain background, or a subject in sharp focus with a blurred background).
-    * Ensure Time Distribution: Ensure these 5 shots are from different time periods to provide a good overview (e.g., one from the beginning, one from the early-middle, one from the exact middle, one from the late-middle, and one from the end).
+3.  **NON-NEGOTIABLE RULES for Frame Selection:**
+    * **RULE 1: NO OBSTRUCTIONS.** Frames MUST NOT contain hands, text overlays, stickers, or other objects significantly covering the product.
+    * **RULE 2: FOCUS & CLARITY.** The product MUST be in sharp focus. Blurry, pixelated, or motion-blurred shots are UNACCEPTABLE.
+    * **RULE 3: PRODUCT CONSISTENCY.** All 5 frames MUST show the *exact same product* matching the `product_description`. Do not select secondary products.
+    * **RULE 4: COMPLETENESS & BACKGROUND.** Aim for frames showing the *entire* product (or >80%) against the *simplest* possible background (e.g., plain wall, blurred background).
+    * **RULE 5: TIME DISTRIBUTION.** The 5 frames must be from different time periods (e.g., beginning, early-middle, middle, late-middle, end).
 
-4.  Compare and Rank: Compare all the clear, uncluttered frames you have selected.
-    * Rank your 5 selections from 1 (the absolute best, clearest, and least cluttered shot, perfect for image search) down to 5 (still very good and clear, but slightly more cluttered than #1).
+4.  **Compare and Rank:**
+    * Select the 5 frames that *best* follow all the rules above.
+    * **Rank 1:** The absolute best, "perfect" shot. (Full product, sharp focus, plain background, no obstructions).
+    * **Rank 5:** Still an excellent, clear shot that follows all rules, but may be a different angle or have a slightly busier background than Rank 1.
 
-Goal: I need the product queries, the visual description, and the top 5 least cluttered frames from the entire video, representing different moments.
+[OUTPUT]
+Your output must be ONLY the JSON object. Do not include any text before or after the JSON.
 
-Your output must be only the JSON object.
-
-📝 Required JSON Output
-The JSON object must contain identified_product, product_description, search_query_persian, and the best_frames array. The best_frames array must contain exactly five items, ranked 1 through 5.
-
-Example JSON Output:
+[Example JSON Output]
 JSON
 {
   "identified_product": "Hand Pump Foam Sprayer",
-  "product_description": "Yellow and black plastic hand pump sprayer with a translucent white bottle.",
+  "product_description": "Yellow and black plastic hand pump sprayer. Features a translucent white bottle, black pump handle, and a yellow nozzle with a black adjustment tip.",
   "search_query_persian": "اسپری کف پاش دستی",
   "best_frames": [
     {

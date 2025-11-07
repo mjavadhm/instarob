@@ -1,5 +1,5 @@
 product_search:
-  model: gemini-2.5-flash-lite
+  model: google/gemini-2.5-flash-lite
   prompt_file: "prompts/product_search.txt"
   temperature: 0.3
 
@@ -16,5 +16,5 @@ final_ranking_openrouter:
   prompt_file: "prompts/final_ranking.txt"
 
 caption_analysis:
-  model: "google/gemini-2.5-flash"
+  model: "openai/gpt-4.1"
   prompt_file: "prompts/caption_analysis.txt"
