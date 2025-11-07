@@ -121,8 +121,8 @@ class FilterService:
                 logger.warning(f"OpenRouter response key 'ranked_keys' was not a list of strings: {ranked_keys}")
                 return [], prompt_tokens, completion_tokens, self.model_name
 
-        except Exception as e:
-            logger.error(f"An error occurred during OpenRouter final ranking: {e}", exc_info=True)
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to decode JSON response from OpenRouter: {e}", exc_info=True)
             return [], 0, 0, self.model_name
 
 filter_service = FilterService()

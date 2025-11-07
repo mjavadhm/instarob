@@ -80,9 +80,6 @@ class OpenRouterService:
         except (json.JSONDecodeError, ValidationError) as e:
             logger.error(f"Failed to parse or validate OpenRouter response for caption analysis: {e}", exc_info=True)
             return None, 0, 0
-        except Exception as e:
-            logger.error(f"An error occurred during OpenRouter caption analysis: {e}", exc_info=True)
-            return None, 0, 0
 
     @async_retry()
     async def filter_text_search_results(
@@ -147,8 +144,8 @@ class OpenRouterService:
                 logger.warning(f"OpenRouter response key 'relevant_keys' was not a list of strings: {relevant_keys}")
                 return [], prompt_tokens, completion_tokens
 
-        except Exception as e:
-            logger.error(f"An error occurred during OpenRouter text filtering: {e}", exc_info=True)
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Failed to parse or validate OpenRouter response for text filtering: {e}", exc_info=True)
             return [], 0, 0
 
 openrouter_service = OpenRouterService()
