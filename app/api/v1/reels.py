@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.models.reel_in import ReelIn
-from app.models.frame_analysis import FrameAnalysis
+from app.models.suggestions_out import SuggestionsOut
 from app.services.reels_service import reels_service, ReelsService
 
 router = APIRouter()
 
-@router.post("/", response_model=FrameAnalysis, status_code=status.HTTP_200_OK)
+@router.post("/", response_model=SuggestionsOut, status_code=status.HTTP_200_OK)
 async def analyze_reel(
     reel_in: ReelIn,
     service: ReelsService = Depends(lambda: reels_service)
