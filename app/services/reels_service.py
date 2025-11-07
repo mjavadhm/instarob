@@ -66,6 +66,10 @@ class ReelsService:
             raise
 
     def _extract_and_save_frames(self, video_path: Path, analysis: FrameAnalysis, request_id: str):
+        if not analysis.identified_product:
+            logger.info("No identified product, skipping frame extraction.")
+            return
+
         request_frame_dir = self.frames_dir / request_id
         request_frame_dir.mkdir(parents=True, exist_ok=True)
         cap = cv2.VideoCapture(str(video_path))
@@ -83,6 +87,8 @@ class ReelsService:
         cap.release()
 
     def _get_frame_paths(self, request_id: str, analysis_result: FrameAnalysis) -> List[Path]:
+        if not analysis_result.identified_product:
+            return []
         request_frame_dir = self.frames_dir / request_id
         sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
         return [
@@ -172,18 +178,24 @@ class ReelsService:
 
             # --- Process Video Analysis Results ---
             video_result = results[0]
-            if isinstance(video_result, Exception) or not video_result[0]:
-                error_message = f"Video analysis path failed: {video_result}"
-                logger.error(error_message, exc_info=video_result)
-                raise RuntimeError(error_message) from video_result
+            analysis_result = None
+            frame_paths = []
 
-            analysis_result, v_prompt, v_resp, v_cost = video_result
-            prompt_token_total += v_prompt
-            response_token_total += v_resp
-            total_cost += v_cost
+            if isinstance(video_result, Exception):
+                logger.error(f"Video analysis path failed critically: {video_result}", exc_info=video_result)
+            elif not video_result[0]:
+                logger.warning("Video analysis returned no result.")
+            else:
+                analysis_result, v_prompt, v_resp, v_cost = video_result
+                prompt_token_total += v_prompt
+                response_token_total += v_resp
+                total_cost += v_cost
+                await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id)
+                frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
 
-            await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id)
-            frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
+            # If video path fails, we need a placeholder to carry on
+            if analysis_result is None:
+                analysis_result = FrameAnalysis(identified_product=None, best_frames=[])
 
             # --- Process Caption Analysis Results ---
             caption_result = results[1]
@@ -244,7 +256,10 @@ class ReelsService:
             analysis_result.searched_image_urls = list(set(all_urls))
 
             product_list_to_rank = list(candidate_products.values())
-            if product_list_to_rank:
+            if not product_list_to_rank:
+                logger.info("No candidate products found to rank. Skipping final ranking.")
+                analysis_result.product_info = []
+            else:
                 ranked_keys, r_p, r_c, r_model = await filter_service.rank_products_with_llm(product_list_to_rank, frame_paths, analysis_result.identified_product)
                 prompt_token_total += r_p
                 response_token_total += r_c
@@ -252,8 +267,6 @@ class ReelsService:
 
                 product_map = {p['random_key']: p for p in product_list_to_rank}
                 analysis_result.product_info = [product_map[key] for key in ranked_keys if key in product_map]
-            else:
-                analysis_result.product_info = []
 
             analysis_result.prompt_token_count = prompt_token_total
             analysis_result.response_token_count = response_token_total
