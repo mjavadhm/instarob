@@ -12,6 +12,7 @@ from typing import Dict, Any, List, Tuple, Optional
 from urllib.parse import urlparse
 import base64
 import google.generativeai as genai
+import uuid
 
 
 from app.core.config import settings
@@ -19,6 +20,7 @@ from app.core.logging import get_logger
 from app.models.reel_in import ReelIn
 from app.models.frame_analysis import FrameAnalysis
 from app.models.caption_analysis import CaptionAnalysis
+from app.models.suggestions_out import SuggestionsOut
 from app.services.product_service import product_service
 from app.services.filter_service import filter_service
 from app.services.cost_service import cost_service
@@ -43,9 +45,6 @@ class ReelsService:
         self.frames_dir = Path("frames")
         self.frames_dir.mkdir(parents=True, exist_ok=True)
 
-        # self.generation_config = genai.types.GenerationConfig(
-        #     temperature=self.llm_config.get("temperature", 0.7)
-        # )
         self.edenai_service = EdenAIService()
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
 
@@ -98,44 +97,12 @@ class ReelsService:
         ]
 
     async def _analyze_video_path(self, reel_in: ReelIn, video_path: Path) -> Tuple[Optional[FrameAnalysis], int, int, float]:
-        # video_file = None
-        # try:
-        #     logger.info(f"Uploading '{video_path.name}' to Gemini File API...")
-        #     video_file = await asyncio.to_thread(genai.upload_file, path=video_path, display_name=video_path.name)
-        #
-        #     start_time = time.time()
-        #     while video_file.state.name == "PROCESSING":
-        #         if time.time() - start_time > 120: raise TimeoutError("File processing timed out.")
-        #         await asyncio.sleep(5)
-        #         video_file = await asyncio.to_thread(genai.get_file, video_file.name)
-        #
-        #     if video_file.state.name == "FAILED": raise RuntimeError("Gemini file processing failed.")
-        #
-        #     model_name = self.llm_config.get("model", "gemini-1.5-flash")
-        #     model = genai.GenerativeModel(model_name)
-        #     full_prompt = f"{self.video_prompt_template}\n\nVideo Caption: {reel_in.caption}"
-        #
-        #     response = await model.generate_content_async([full_prompt, video_file], generation_config=self.generation_config)
-        #
-        #     prompt_tokens = (await model.count_tokens_async([full_prompt, video_file])).total_tokens
-        #     response_tokens = (await model.count_tokens_async(response.text)).total_tokens
-        #
-        #     response_text = response.text.strip().removeprefix("```json").removesuffix("```")
-        #     logger.info(f"Raw Gemini Response: {response_text}")
-        #
-        #     analysis_data = json.loads(response_text)
-        #     analysis_result = FrameAnalysis(**analysis_data)
-        #
-        #     return analysis_result, prompt_tokens, response_tokens
-        # finally:
-        #     if video_file:
-        #         await asyncio.to_thread(genai.delete_file, video_file.name)
         try:
             async with aiofiles.open(video_path, "rb") as f:
                 video_bytes = await f.read()
             video_base64 = base64.b64encode(video_bytes).decode("utf-8")
 
-            full_prompt = f"{self.video_prompt_template}\n\nVideo Caption: {reel_in.caption}"
+            full_prompt = f"{self.video_prompt_template}\n\nVideo Caption: {reel_in.text}"
 
             edenai_response = await self.edenai_service.analyze_video_frames(video_base64, full_prompt)
 
@@ -156,11 +123,12 @@ class ReelsService:
             return None, 0, 0, 0.0
 
     async def _analyze_caption_path(self, reel_in: ReelIn) -> Tuple[Optional[CaptionAnalysis], int, int]:
-        if not reel_in.caption:
+        if not reel_in.text:
             return None, 0, 0
-        return await openrouter_service.analyze_caption_for_search_query(reel_in.caption)
+        return await openrouter_service.analyze_caption_for_search_query(reel_in.text)
 
-    async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
+    async def analyze_reel_video(self, reel_in: ReelIn) -> SuggestionsOut:
+        request_id = str(uuid.uuid4())
         request_start_time = time.time()
         video_path = None
         total_cost = 0.0
@@ -168,7 +136,7 @@ class ReelsService:
         response_token_total = 0
 
         try:
-            video_path = await self._download_video(str(reel_in.reel_url), reel_in.request_id)
+            video_path = await self._download_video(str(reel_in.url), request_id)
 
             # --- Parallel Analysis ---
             video_analysis_task = asyncio.create_task(self._analyze_video_path(reel_in, video_path))
@@ -190,9 +158,9 @@ class ReelsService:
                 prompt_token_total += v_prompt
                 response_token_total += v_resp
                 total_cost += v_cost
-                await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id)
-                frame_paths = await asyncio.to_thread(self._get_frame_paths, reel_in.request_id, analysis_result)
-            # If video path fails, we need a placeholder to carry on
+                await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, request_id)
+                frame_paths = await asyncio.to_thread(self._get_frame_paths, request_id, analysis_result)
+            
             if analysis_result is None:
                 analysis_result = FrameAnalysis(identified_product=None, best_frames=[])
 
@@ -252,31 +220,22 @@ class ReelsService:
                         if p['random_key'] not in candidate_products:
                             candidate_products[p['random_key']] = {**p, 'source': 'image', 'image_url': url}
 
-            analysis_result.searched_image_urls = list(set(all_urls))
-
             product_list_to_rank = list(candidate_products.values())
+            final_keys = []
             if not product_list_to_rank:
                 logger.info("No candidate products found to rank. Skipping final ranking.")
-                analysis_result.product_info = []
             else:
                 ranked_keys, r_p, r_c, r_model = await filter_service.rank_products_with_llm(product_list_to_rank, frame_paths, analysis_result.identified_product)
                 prompt_token_total += r_p
                 response_token_total += r_c
                 total_cost += cost_service.calculate_cost(r_model, r_p, r_c)
+                final_keys = ranked_keys
 
-                product_map = {p['random_key']: p for p in product_list_to_rank}
-                analysis_result.product_info = [product_map[key] for key in ranked_keys if key in product_map]
-
-            analysis_result.prompt_token_count = prompt_token_total
-            analysis_result.response_token_count = response_token_total
-            return analysis_result
+            return SuggestionsOut(suggestions=final_keys)
 
         except Exception as e:
             logger.error(f"Critical error in video analysis workflow: {e}", exc_info=True)
-            # Create a minimal error response
-            error_response = FrameAnalysis(identified_product="Error", best_frames=[])
-            error_response.product_description = str(e)
-            return error_response
+            return SuggestionsOut(suggestions=[])
         finally:
             if video_path and os.path.exists(video_path):
                 await asyncio.to_thread(os.remove, video_path)
