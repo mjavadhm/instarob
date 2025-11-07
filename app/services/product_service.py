@@ -91,7 +91,7 @@ class ProductService:
 
             async with httpx.AsyncClient() as client:
                 logger.info("Uploading image to Torob...")
-                response = await self._request_with_retry(client.post, torob_url, files=files, headers=self.torob_headers, timeout=40)
+                response = await self._request_with_retry(client.post, torob_url, files=files, headers=self.torob_headers, timeout=10)
                 if not response: return None
 
                 response_data = response.json()
@@ -120,7 +120,7 @@ class ProductService:
         try:
             async with httpx.AsyncClient() as client:
                 logger.info(f"Searching on Torob with image URL: {image_url}")
-                response = await self._request_with_retry(client.get, torob_url, headers=self.torob_headers, timeout=40)
+                response = await self._request_with_retry(client.get, torob_url, headers=self.torob_headers, timeout=10)
                 if not response: return None
 
                 results = response.json()
@@ -160,7 +160,7 @@ class ProductService:
         try:
             async with httpx.AsyncClient() as client:
                 logger.info(f"Searching on Torob with text query: '{query}'")
-                response = await self._request_with_retry(client.get, search_url, headers=self.torob_headers, timeout=40)
+                response = await self._request_with_retry(client.get, search_url, headers=self.torob_headers, timeout=15)
                 if not response: return None
 
                 data = response.json()
