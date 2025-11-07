@@ -46,6 +46,7 @@ class EdenAIService:
             try:
                 response = await client.post(self.api_url, json=payload, headers=headers, timeout=120)
                 response.raise_for_status()
+                # print(str(response.text))
                 return response.json()
             except httpx.HTTPStatusError as e:
                 # Log the error and re-raise or handle it
