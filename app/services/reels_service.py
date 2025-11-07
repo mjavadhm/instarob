@@ -191,8 +191,7 @@ class ReelsService:
                 response_token_total += v_resp
                 total_cost += v_cost
                 await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, reel_in.request_id)
-                frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
-
+                frame_paths = await asyncio.to_thread(self._get_frame_paths, reel_in.request_id, analysis_result)
             # If video path fails, we need a placeholder to carry on
             if analysis_result is None:
                 analysis_result = FrameAnalysis(identified_product=None, best_frames=[])
