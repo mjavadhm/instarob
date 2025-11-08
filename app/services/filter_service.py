@@ -157,7 +157,7 @@ class FilterService:
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nProduct {i+1}:\n"
-                    f"Name: {product.get('title')}\n" # Note: title from image search
+                    f"Name: {product.get('title') or product.get('name')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
@@ -176,7 +176,7 @@ class FilterService:
                 extra_headers={"HTTP-Referer": "https://instarob.ai", "X-Title": "Instarob AI"},
                 response_format={"type": "json_object"},
             )
-            logger.info(f"Raw OpenRouter Final Ranking Response: {completion.choices[0].message.content.strip()}")
+
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             parsed_json = json.loads(response_text)
             ranked_products = parsed_json.get("ranked_products", [])
@@ -196,74 +196,73 @@ class FilterService:
             logger.error(f"An error occurred during final ranking: {e}", exc_info=True)
             return [], 0, 0
 
-    async def filter_and_rank_products(
+    async def filter_image_products_parallel(
         self,
         products: List[Dict[str, Any]],
         ground_truth_frame_paths: List[Path],
         identified_product: str,
         product_description: str
-    ) -> Tuple[List[str], int, int, str, float]:
+    ) -> Tuple[List[Dict[str, Any]], int, int, float]:
         total_prompt_tokens = 0
         total_completion_tokens = 0
 
-        # Step 1: Take top 9 products for intermediate filtering
         products_to_filter = products[:9]
-
-        # Step 2: Create batches of 3
         batches = [products_to_filter[i:i + 3] for i in range(0, len(products_to_filter), 3)]
 
-        # Step 3: Run filtering in parallel
-        filter_tasks = []
-        for batch in batches:
-            if batch:
-                task = openrouter_service.filter_image_search_results(
-                    products=batch,
-                    frame_paths=ground_truth_frame_paths,
-                    identified_product=identified_product,
-                    product_description=product_description
-                )
-                filter_tasks.append(task)
+        filter_tasks = [
+            openrouter_service.filter_image_search_results(
+                products=batch,
+                frame_paths=ground_truth_frame_paths,
+                identified_product=identified_product,
+                product_description=product_description
+            ) for batch in batches if batch
+        ]
 
         logger.info(f"Starting parallel filtering for {len(filter_tasks)} batches.")
         filter_results = await asyncio.gather(*filter_tasks, return_exceptions=True)
 
-        # Step 4: Aggregate results
         intermediate_ranked_keys = []
         filtering_cost = 0
         for result in filter_results:
             if isinstance(result, Exception):
                 logger.error(f"An exception occurred during parallel filtering: {result}", exc_info=True)
-            else:
-                keys, p_tokens, c_tokens = result
-                intermediate_ranked_keys.extend(keys)
-                total_prompt_tokens += p_tokens
-                total_completion_tokens += c_tokens
-                cost = cost_service.calculate_cost(openrouter_service.image_filter_model, p_tokens, c_tokens)
-                filtering_cost += cost
+                continue
+
+            keys, p_tokens, c_tokens = result
+            intermediate_ranked_keys.extend(keys)
+            total_prompt_tokens += p_tokens
+            total_completion_tokens += c_tokens
+            cost = cost_service.calculate_cost(openrouter_service.image_filter_model, p_tokens, c_tokens)
+            filtering_cost += cost
+
         logger.info(f"Cost of parallel filtering stage: ${filtering_cost:.6f}")
 
-        # Deduplicate keys while preserving order
         unique_keys = list(dict.fromkeys(intermediate_ranked_keys))
         logger.info(f"Aggregated {len(unique_keys)} unique products after intermediate filtering.")
 
-        # Map keys back to product objects
         products_by_key = {p["random_key"]: p for p in products}
-        products_for_final_ranking = [products_by_key[key] for key in unique_keys if key in products_by_key]
+        filtered_products = [products_by_key[key] for key in unique_keys if key in products_by_key]
 
-        # Step 5: Perform final ranking on the aggregated list
-        final_ranked_keys, p_tokens, c_tokens = await self._final_rank_products(
-            products=products_for_final_ranking,
+        return filtered_products, total_prompt_tokens, total_completion_tokens, filtering_cost
+
+    async def rank_final_products(
+        self,
+        products: List[Dict[str, Any]],
+        ground_truth_frame_paths: List[Path],
+        identified_product: str,
+        product_description: str
+    ) -> Tuple[List[str], int, int, float]:
+
+        ranked_keys, p_tokens, c_tokens = await self._final_rank_products(
+            products=products,
             ground_truth_frame_paths=ground_truth_frame_paths,
             identified_product=identified_product,
             product_description=product_description,
         )
-        total_prompt_tokens += p_tokens
-        total_completion_tokens += c_tokens
-        final_ranking_cost = cost_service.calculate_cost(self.model_name, p_tokens, c_tokens)
-        logger.info(f"Cost of final ranking stage: ${final_ranking_cost:.6f}")
 
-        total_filter_service_cost = filtering_cost + final_ranking_cost
+        cost = cost_service.calculate_cost(self.model_name, p_tokens, c_tokens)
+        logger.info(f"Cost of final ranking stage: ${cost:.6f}")
 
-        return final_ranked_keys, total_prompt_tokens, total_completion_tokens, self.model_name, total_filter_service_cost
+        return ranked_keys, p_tokens, c_tokens, cost
 
 filter_service = FilterService()

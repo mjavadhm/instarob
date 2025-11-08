@@ -214,24 +214,40 @@ class ReelsService:
                 keys_map = {key: i for i, key in enumerate(keys)}
                 filtered_text_products = sorted([p for p in text_search_products if p['random_key'] in keys_map], key=lambda p: keys_map[p['random_key']])[:5]
 
-            # --- Combine, Deduplicate, and Final Rank ---
-            candidate_products = {p['random_key']: {**p, 'source': 'text'} for p in filtered_text_products}
-
-            all_urls = []
+            # --- Image Product Filtering ---
+            all_image_products = []
             for result in image_search_results:
                 if result and result.get("products"):
                     url = result.get("searched_image_url")
-                    if url: all_urls.append(url)
-                    for p in result["products"][:5]:
-                        if p['random_key'] not in candidate_products:
-                            candidate_products[p['random_key']] = {**p, 'source': 'image', 'image_url': url}
+                    for p in result["products"]:
+                        all_image_products.append({**p, 'image_url': url})
 
-            product_list_to_rank = list(candidate_products.values())
+            filtered_image_products = []
+            if all_image_products:
+                f_prods, f_p, f_c, f_cost = await filter_service.filter_image_products_parallel(
+                    products=all_image_products,
+                    ground_truth_frame_paths=frame_paths,
+                    identified_product=analysis_result.identified_product,
+                    product_description=analysis_result.product_description
+                )
+                filtered_image_products = f_prods
+                prompt_token_total += f_p
+                response_token_total += f_c
+                total_cost += f_cost
+
+            # --- Combine, Deduplicate, and Final Rank ---
+            final_candidates = {p['random_key']: p for p in filtered_text_products}
+            for p in filtered_image_products:
+                if p['random_key'] not in final_candidates:
+                    final_candidates[p['random_key']] = p
+
+            product_list_to_rank = list(final_candidates.values())
+
             final_keys = []
             if not product_list_to_rank:
                 logger.info("No candidate products found to rank. Skipping final ranking.")
             else:
-                ranked_keys, r_p, r_c, r_model, filter_service_cost = await filter_service.filter_and_rank_products(
+                ranked_keys, r_p, r_c, r_cost = await filter_service.rank_final_products(
                     products=product_list_to_rank,
                     ground_truth_frame_paths=frame_paths,
                     identified_product=analysis_result.identified_product,
@@ -239,7 +255,7 @@ class ReelsService:
                 )
                 prompt_token_total += r_p
                 response_token_total += r_c
-                total_cost += filter_service_cost
+                total_cost += r_cost
                 final_keys = ranked_keys
 
             logger.info(f"Final suggested product keys: {final_keys}")

@@ -16,7 +16,7 @@ image_search_filter:
   prompt_file: "prompts/image_search_filter.txt"
 
 final_ranking_openrouter:
-  model: "google/gemini-2.5-pro"
+  model: "google/gemini-2.5-flash"
   prompt_file: "prompts/final_ranking.txt"
 
 caption_analysis:
