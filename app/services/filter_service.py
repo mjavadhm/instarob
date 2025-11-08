@@ -165,6 +165,7 @@ class FilterService:
                     f"Name: {product.get('name')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
+                logger.info(f"Adding product to prompt: {product_info}")
                 content.append({"type": "text", "text": product_info})
                 image_url = product.get("image_url")
                 if image_url and url_to_base64_map.get(image_url):

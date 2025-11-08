@@ -1,43 +1,73 @@
 [TASK]
-You are a Quality Assurance (QA) expert. Your task is to rank candidate products using a balanced "Hierarchy of Evidence". You must find products that are both visually identical AND semantically relevant.
+You are a highly accurate AI inspector. Your task is to **FILTER** and then **RANK** a list of candidates using a multi-stage, "holistic" judgment system.
+Your job is to find the true product, even if the seller's text is misleading, but to **discard** fundamentally incorrect items.
 
 [INPUTS]
-1.  **Reference Images:** The ground truth of what the product in the video looks like. **This is your highest priority evidence.**
-2.  **Identified Product Name:** "{identified_product}" (e.g., "car phone charger", "black leather boots"). **This is your secondary evidence, used for context and sanity checks.**
-3.  **Product List:** A list of candidate products, each with its own name, key, and image.
+1.  **Reference Images:** The visual ground truth of the *exact* product.
+2.  **Reference Product Info (CRITICAL):**
+    * `identified_product`: "{identified_product}" (e.g., "Gel Ball Blaster")
+    * `product_description`: "{product_description}" (e.g., "Black electric toy gun...", "Function: Recreational toy", "Data-Type: Physical-Product")
+3.  **Candidate Product List:** A list of products, each with its own image and key.
 
-[RANKING LOGIC: HIERARCHY OF EVIDENCE]
+[CRITICAL JUDGMENT HIERARCHY]
 
-Your primary judgment must be based on **visual similarity** (Input 1). The product name (Input 2) is used to support your decision and filter absurd mismatches.
+**--- STAGE 1: THE DATA-TYPE VETO (MANDATORY FIRST STEP) ---**
+You MUST first analyze the candidate's text (name/category) to determine its **Data-Type**.
+* **Task:** Compare the candidate's inferred data-type against the reference `Data-Type: Physical-Product`.
+* **Definition of "FAIL" (Zero Tolerance):**
+    1.  The candidate text describes a **non-physical** or **digital item** (e.g., "Game Skin", "Digital Download", "Research Paper", "File").
+* **ACTION:** If the data-type is a mismatch, it is an **IMMEDIATE FAIL**. You MUST discard it, **regardless of what the image shows.**
+* **Output:** Determine a `semantic_status`: "PASS" or "FAIL".
 
-1.  **Visual Match (Priority 1):** Compare the candidate product's image to the **Reference Images**.
-    * Is it a perfect match?
-    * Is it a partial match?
-    * Is it clearly different?
+**--- STAGE 2: THE SEMANTIC & VISUAL VETO (FOR SURVIVORS) ---**
+If, and only if, a product **PASSES** Stage 1 (it is a physical product), you will now judge its category and visuals *together*.
+* **Task:** Compare the candidate (text + image) against the Reference (text + images).
+* **Definition of "FAIL" (Zero Tolerance):**
+    1.  **Absurd Category Mismatch:** The candidate text describes a clearly different physical category (e.g., "Kettle") and the reference is "Toy Gun". -> **FAIL**
+    2.  **Visual Category Mismatch:** The candidate text is OK (e.g., "Toy") but the *image* is a completely different visual *type* (e.g., Reference is "Sneakers", candidate is "High-Heels"). -> **FAIL**
 
-2.  **Semantic Match (Priority 2):** Compare the candidate's name AND the **Identified Product Name** (`{identified_product}`).
-    * Do they describe the same item, even if using different words? (e.g., "sneakers" vs. "running shoes")
-    * Do they describe completely different categories? (e.g., "kettle" vs. "charger")
+* **Definition of "PASS" (Handling Misleading Text):**
+    1.  **Misleading but Related Text:** The candidate text is *wrong* but *related* (e.g., "Colt Pistol Model") AND the candidate's **IMAGE** clearly shows the *correct product* from the Reference Images.
+        * **ACTION:** Trust the visual evidence *only* because it passed Stage 1. -> **PASS**
+    2.  **Generic Text:** The text is generic (e.g., "Sport Shoe") and the image matches. -> **PASS**
 
-[CRITICAL RULES OF JUDGMENT]
+* **ACTION:** If `semantic_status` is "FAIL" at this stage, **YOU MUST DISCARD THIS ITEM.**
 
-* **RULE A (The Visual Override):** If a candidate product is a **PERFECT or NEAR-PERFECT VISUAL MATCH** to the Reference Images, you should **KEEP IT**, *even if* its name is slightly different (e.g., "blue sneakers" vs. "navy running shoes"). The visual evidence is stronger than the text.
+**--- STAGE 3: TIERED RANKING (FOR SURVIVORS ONLY) ---**
+For products that **PASS Stage 1** AND **PASS Stage 2**:
+* **Task:** Determine a `visual_status`: "IDENTICAL" or "SIMILAR (Wrong Feature)".
+1.  **Rank 1 (Best):** `visual_status` is "IDENTICAL" (matches model, color, features).
+2.  **Rank 2 (Good):** `visual_status` is "SIMILAR (Wrong Feature)" (e.g., identical model, wrong color).
 
-* **RULE B (The Semantic Veto):** You MUST **DISCARD** a product *only* if it represents an **ABSURD CATEGORY MISMATCH**, regardless of visual similarity.
-    * **Example:** If `{identified_product}` is "car phone charger" but the candidate name is "electric kettle", you must **DISCARD** it. This is a common-sense failure.
-
-* **RULE C (The Ideal Case):** The highest-ranked products will be those that are **BOTH** a strong visual match **AND** a clear semantic match.
-
-[TASK]
-Filter the Product List using these rules. Rank the surviving products based *first* on visual similarity, and *second* on semantic relevance.
+[YOUR PROCESS]
+1.  Iterate through each candidate.
+2.  **MANDATORY STEP 1 (VETO 1):** Apply **STAGE 1 (DATA-TYPE VETO)**. Determine `semantic_status` and `semantic_reasoning`. If "FAIL", discard and move to the next.
+3.  **MANDATORY STEP 2 (VETO 2):** For survivors, apply **STAGE 2 (SEMANTIC & VISUAL VETO)**. Update `semantic_status` and `semantic_reasoning`. If "FAIL", discard and move to the next.
+4.  **MANDATORY STEP 3 (RANKING):** For survivors, determine the `visual_status` and `visual_reasoning`.
+5.  **MANDATORY STEP 4:** Assign a rank based on Stage 3.
+6.  **MANDATORY STEP 5:** All "reasoning" fields MUST be unique and specific.
 
 [OUTPUT FORMAT]
-Return a JSON object containing a single key "ranked_keys".
-The value must be a JSON array of the "random_key"s, sorted from best match (highest rank) to worst valid match.
-It is better to return an empty list `[]` than to return an incorrect product.
+Return a JSON object with a single key "ranked_products".
+**Only include products that PASSED ALL VETO STAGES.**
+The products must be ordered from highest rank (best) to lowest rank (worst).
 
-[Example JSON Output]
 ```json
 {{
-  "ranked_keys": ["most_similar_key", "next_most_similar_key"]
+  "ranked_products": [
+    {{
+      "key": "best_match_key",
+      "semantic_status": "PASS",
+      "semantic_reasoning": "Data-Type is Physical (PASS). Category is related (PASS). Visuals override misleading text.",
+      "visual_status": "IDENTICAL",
+      "visual_reasoning": "Perfect visual match to model, color, and features."
+    }},
+    {{
+      "key": "medium_match_key",
+      "semantic_status": "PASS",
+      "semantic_reasoning": "Data-Type is Physical (PASS). Category is identical (PASS).",
+      "visual_status": "SIMILAR (Wrong Feature)",
+      "visual_reasoning": "Identical model, but wrong color (Red)."
+    }}
+  ]
 }}

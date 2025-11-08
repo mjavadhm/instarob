@@ -114,6 +114,7 @@ class OpenRouterService:
                     f"Name: {product.get('name')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
+                logger.info(f"Adding product to prompt: {product_info}")
                 content.append({"type": "text", "text": product_info})
                 if product.get("image_url"):
                     content.append({
@@ -185,6 +186,7 @@ class OpenRouterService:
                     f"Name: {product.get('name')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
+                logger.info(f"Adding product to prompt: {product_info}")
                 content.append({"type": "text", "text": product_info})
                 if product.get("image_url"):
                     content.append({
