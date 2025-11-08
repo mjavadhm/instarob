@@ -176,8 +176,7 @@ class FilterService:
                 extra_headers={"HTTP-Referer": "https://instarob.ai", "X-Title": "Instarob AI"},
                 response_format={"type": "json_object"},
             )
-            
-            logger.info(f"Raw OpenRouter Final Ranking Response: {completion.choices[0].message.content.strip()}")
+
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             parsed_json = json.loads(response_text)
             ranked_products = parsed_json.get("ranked_products", [])
@@ -207,11 +206,11 @@ class FilterService:
         total_prompt_tokens = 0
         total_completion_tokens = 0
 
-        # Step 1: Take top 20 products for intermediate filtering
-        products_to_filter = products[:20]
+        # Step 1: Take top 9 products for intermediate filtering
+        products_to_filter = products[:9]
 
-        # Step 2: Create batches of 5
-        batches = [products_to_filter[i:i + 5] for i in range(0, len(products_to_filter), 5)]
+        # Step 2: Create batches of 3
+        batches = [products_to_filter[i:i + 3] for i in range(0, len(products_to_filter), 3)]
 
         # Step 3: Run filtering in parallel
         filter_tasks = []

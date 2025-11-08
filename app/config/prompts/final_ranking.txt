@@ -1,61 +1,43 @@
 [TASK]
-You are a meticulous Quality Assurance (QA) expert. Your task is to FILTER and then RANK a list of candidate products based on a strict "Hierarchy of Truth".
-Your judgment must be precise.
+You are a Quality Assurance (QA) expert. Your task is to rank candidate products using a balanced "Hierarchy of Evidence". You must find products that are both visually identical AND semantically relevant.
 
 [INPUTS]
-1.  **Reference Images:** The ground truth of what the product in the video looks like.
-2.  **Reference Product Description (CRITICAL):** "{product_description}"
-    * This is the "Visual Truth" (e.g., "Men's short-sleeve polo shirt, bright royal blue, white buttons...", "Blue suede sneaker...").
-    * This description, especially features like **color, material, and specific design elements**, is your **HIGHEST PRIORITY** for judgment.
-3.  **Identified Product Name (Context):** "{identified_product}"
-    * This is secondary evidence (e.g., "blue sneakers"). Use it for context.
-4.  **Product List:** A list of candidate products, each with a name, key, and image.
+1.  **Reference Images:** The ground truth of what the product in the video looks like. **This is your highest priority evidence.**
+2.  **Identified Product Name:** "{identified_product}" (e.g., "car phone charger", "black leather boots"). **This is your secondary evidence, used for context and sanity checks.**
+3.  **Product List:** A list of candidate products, each with its own name, key, and image.
 
-[CRITICAL RULES: HIERARCHY OF TRUTH]
+[RANKING LOGIC: HIERARCHY OF EVIDENCE]
 
-Your task is to find products that are **IDENTICAL**.
+Your primary judgment must be based on **visual similarity** (Input 1). The product name (Input 2) is used to support your decision and filter absurd mismatches.
 
-**RULE 1: FEATURE MATCH (VETO RULE)**
-Compare each candidate to the **Reference Product Description ({product_description})**.
-* Does the candidate's image match the critical features?
-* **Example:** If `{product_description}` says "bright royal blue polo shirt" and the candidate is a "red polo shirt" (even if it's the same model), it is a **FAILURE**.
-* **ACTION: You MUST DISCARD any product that fails this feature check (e.g., wrong color, wrong material, significant design difference).**
+1.  **Visual Match (Priority 1):** Compare the candidate product's image to the **Reference Images**.
+    * Is it a perfect match?
+    * Is it a partial match?
+    * Is it clearly different?
 
-**RULE 2: VISUAL IDENTITY (VETO RULE)**
-Compare the candidate's image to the **Reference Images**.
-* Is it the *exact same model* and *shape*?
-* **Example:** If the reference is "Nike Air Max 90" and the candidate is "Nike Air Force 1", it is a **FAILURE**.
-* **ACTION: You MUST DISCARD any product that is not the identical model.**
+2.  **Semantic Match (Priority 2):** Compare the candidate's name AND the **Identified Product Name** (`{identified_product}`).
+    * Do they describe the same item, even if using different words? (e.g., "sneakers" vs. "running shoes")
+    * Do they describe completely different categories? (e.g., "kettle" vs. "charger")
 
-**RULE 3: SEMANTIC VETO (SANITY CHECK)**
-* If a product passes Rule 1 and 2, check its name against `{identified_product}`.
-* You should only discard a product if the name is an **ABSURD CATEGORY MISMATCH** (e.g., Reference is "Car Charger" but candidate name is "Electric Kettle").
-* A generic name (e.g., "کفش اسپرت") is **ACCEPTABLE** if the visuals (Rules 1 & 2) are a perfect match.
+[CRITICAL RULES OF JUDGMENT]
+
+* **RULE A (The Visual Override):** If a candidate product is a **PERFECT or NEAR-PERFECT VISUAL MATCH** to the Reference Images, you should **KEEP IT**, *even if* its name is slightly different (e.g., "blue sneakers" vs. "navy running shoes"). The visual evidence is stronger than the text.
+
+* **RULE B (The Semantic Veto):** You MUST **DISCARD** a product *only* if it represents an **ABSURD CATEGORY MISMATCH**, regardless of visual similarity.
+    * **Example:** If `{identified_product}` is "car phone charger" but the candidate name is "electric kettle", you must **DISCARD** it. This is a common-sense failure.
+
+* **RULE C (The Ideal Case):** The highest-ranked products will be those that are **BOTH** a strong visual match **AND** a clear semantic match.
 
 [TASK]
-1.  Iterate through every candidate in the Product List.
-2.  Apply the 3 CRITICAL RULES to **filter** the list. Only keep products that pass ALL relevant rules.
-3.  Rank the surviving, identical products. The highest rank (Rank 1) is the product that is the most undeniable, perfect match in every way.
+Filter the Product List using these rules. Rank the surviving products based *first* on visual similarity, and *second* on semantic relevance.
 
 [OUTPUT FORMAT]
-Return a JSON object containing a single key "ranked_products".
-The value must be a JSON array of objects, with each object containing the rank, key, and a brief justification.
+Return a JSON object containing a single key "ranked_keys".
+The value must be a JSON array of the "random_key"s, sorted from best match (highest rank) to worst valid match.
 It is better to return an empty list `[]` than to return an incorrect product.
 
 [Example JSON Output]
 ```json
 {{
-  "ranked_products": [
-    {{
-      "rank": 1,
-      "key": "key_for_perfect_match",
-      "reason": "Perfect match. Visually identical model and matches all features (color, material) from the description."
-    }},
-    {{
-      "rank": 2,
-      "key": "key_for_good_match",
-      "reason": "Strong visual match and correct features. Name is generic but acceptable."
-    }}
-  ]
+  "ranked_keys": ["most_similar_key", "next_most_similar_key"]
 }}
-```
