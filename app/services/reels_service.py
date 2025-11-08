@@ -177,7 +177,9 @@ class ReelsService:
                 response_token_total += c_resp
                 if caption_analysis and caption_analysis.search_query_persian:
                     caption_search_query = caption_analysis.search_query_persian
-                    total_cost += cost_service.calculate_cost(openrouter_service.caption_analysis_model, c_prompt, c_resp)
+                    cost = cost_service.calculate_cost(openrouter_service.caption_analysis_model, c_prompt, c_resp)
+                    total_cost += cost
+                    logger.info(f"Cost of caption analysis: ${cost:.6f}")
 
             # --- Concurrent Searches ---
             image_search_tasks = [product_service.search_product(fp, analysis_result.identified_product) for fp in frame_paths]
@@ -205,7 +207,9 @@ class ReelsService:
                 keys, or_p, or_c = await openrouter_service.filter_text_search_results(text_search_products, frame_paths, analysis_result.identified_product)
                 prompt_token_total += or_p
                 response_token_total += or_c
-                total_cost += cost_service.calculate_cost(openrouter_service.text_filter_model, or_p, or_c)
+                cost = cost_service.calculate_cost(openrouter_service.text_filter_model, or_p, or_c)
+                total_cost += cost
+                logger.info(f"Cost of text search filtering: ${cost:.6f}")
 
                 keys_map = {key: i for i, key in enumerate(keys)}
                 filtered_text_products = sorted([p for p in text_search_products if p['random_key'] in keys_map], key=lambda p: keys_map[p['random_key']])[:5]
@@ -235,9 +239,12 @@ class ReelsService:
                 )
                 prompt_token_total += r_p
                 response_token_total += r_c
-                total_cost += cost_service.calculate_cost(r_model, r_p, r_c)
+                cost = cost_service.calculate_cost(r_model, r_p, r_c)
+                total_cost += cost
+                logger.info(f"Cost of final ranking: ${cost:.6f}")
                 final_keys = ranked_keys
 
+            logger.info(f"Final suggested product keys: {final_keys}")
             return SuggestionsOut(suggestions=final_keys)
 
         except Exception as e:

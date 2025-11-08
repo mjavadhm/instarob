@@ -12,6 +12,7 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.utils import async_retry
 from app.services.openrouter_service import openrouter_service
+from app.services.cost_service import cost_service
 
 logger = get_logger()
 
@@ -223,6 +224,7 @@ class FilterService:
 
         # Step 4: Aggregate results
         intermediate_ranked_keys = []
+        filtering_cost = 0
         for result in filter_results:
             if isinstance(result, Exception):
                 logger.error(f"An exception occurred during parallel filtering: {result}", exc_info=True)
@@ -231,6 +233,9 @@ class FilterService:
                 intermediate_ranked_keys.extend(keys)
                 total_prompt_tokens += p_tokens
                 total_completion_tokens += c_tokens
+                cost = cost_service.calculate_cost(openrouter_service.image_filter_model, p_tokens, c_tokens)
+                filtering_cost += cost
+        logger.info(f"Cost of parallel filtering stage: ${filtering_cost:.6f}")
 
         # Deduplicate keys while preserving order
         unique_keys = list(dict.fromkeys(intermediate_ranked_keys))
@@ -248,6 +253,8 @@ class FilterService:
         )
         total_prompt_tokens += p_tokens
         total_completion_tokens += c_tokens
+        final_ranking_cost = cost_service.calculate_cost(self.model_name, p_tokens, c_tokens)
+        logger.info(f"Cost of final ranking stage: ${final_ranking_cost:.6f}")
 
         return final_ranked_keys, total_prompt_tokens, total_completion_tokens, self.model_name
 
