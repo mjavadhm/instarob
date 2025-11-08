@@ -176,7 +176,8 @@ class FilterService:
                 extra_headers={"HTTP-Referer": "https://instarob.ai", "X-Title": "Instarob AI"},
                 response_format={"type": "json_object"},
             )
-
+            
+            logger.info(f"Raw OpenRouter Final Ranking Response: {completion.choices[0].message.content.strip()}")
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             parsed_json = json.loads(response_text)
             ranked_products = parsed_json.get("ranked_products", [])
