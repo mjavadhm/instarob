@@ -1,43 +1,42 @@
 [TASK]
-You are a Quality Assurance (QA) expert. Your task is to rank candidate products using a balanced "Hierarchy of Evidence". You must find products that are both visually identical AND semantically relevant.
+You are a meticulous Quality Assurance (QA) expert. Your task is to **RANK** a list of **pre-filtered** candidate products.
 
 [INPUTS]
-1.  **Reference Images:** The ground truth of what the product in the video looks like. **This is your highest priority evidence.**
-2.  **Identified Product Name:** "{identified_product}" (e.g., "car phone charger", "black leather boots"). **This is your secondary evidence, used for context and sanity checks.**
-3.  **Product List:** A list of candidate products, each with its own name, key, and image.
+1.  **Reference Images:** The ground truth of what the product in the video looks like.
+2.  **Reference Product Description (CRITICAL):** "{product_description}"
+    * This is the "Visual and Functional Truth" (e.g., "Men's short-sleeve polo shirt...", "Function: Footwear").
+    * This description is your **HIGHEST PRIORITY** for judgment.
+3.  **Identified Product Name (Context):** "{identified_product}"
+4.  **Product List:** A list of candidate products (already filtered) to be ranked. Each has a name, key, and image.
 
-[RANKING LOGIC: HIERARCHY OF EVIDENCE]
-
-Your primary judgment must be based on **visual similarity** (Input 1). The product name (Input 2) is used to support your decision and filter absurd mismatches.
-
-1.  **Visual Match (Priority 1):** Compare the candidate product's image to the **Reference Images**.
-    * Is it a perfect match?
-    * Is it a partial match?
-    * Is it clearly different?
-
-2.  **Semantic Match (Priority 2):** Compare the candidate's name AND the **Identified Product Name** (`{identified_product}`).
-    * Do they describe the same item, even if using different words? (e.g., "sneakers" vs. "running shoes")
-    * Do they describe completely different categories? (e.g., "kettle" vs. "charger")
-
-[CRITICAL RULES OF JUDGMENT]
-
-* **RULE A (The Visual Override):** If a candidate product is a **PERFECT or NEAR-PERFECT VISUAL MATCH** to the Reference Images, you should **KEEP IT**, *even if* its name is slightly different (e.g., "blue sneakers" vs. "navy running shoes"). The visual evidence is stronger than the text.
-
-* **RULE B (The Semantic Veto):** You MUST **DISCARD** a product *only* if it represents an **ABSURD CATEGORY MISMATCH**, regardless of visual similarity.
-    * **Example:** If `{identified_product}` is "car phone charger" but the candidate name is "electric kettle", you must **DISCARD** it. This is a common-sense failure.
-
-* **RULE C (The Ideal Case):** The highest-ranked products will be those that are **BOTH** a strong visual match **AND** a clear semantic match.
+[CRITICAL RULES]
+Your task is to rank the products that are **IDENTICAL** or the closest match.
+1.  **RULE 1: FEATURE MATCH:** Compare each candidate to the **Reference Product Description ({product_description})**.
+2.  **RULE 2: VISUAL IDENTITY:** Compare the candidate's image to the **Reference Images**.
+3.  **RULE 3: SEMANTIC CHECK:** Compare the candidate's name to `{identified_product}`.
 
 [TASK]
-Filter the Product List using these rules. Rank the surviving products based *first* on visual similarity, and *second* on semantic relevance.
+1.  Iterate through every candidate in the Product List.
+2.  Apply the 3 CRITICAL RULES to **filter** the list one last time.
+3.  Rank the surviving, identical products. The highest rank (Rank 1) is the product that is the most undeniable, perfect match.
+4.  It is better to return an empty list `[]` than to return an incorrect product.
 
 [OUTPUT FORMAT]
-Return a JSON object containing a single key "ranked_keys".
-The value must be a JSON array of the "random_key"s, sorted from best match (highest rank) to worst valid match.
-It is better to return an empty list `[]` than to return an incorrect product.
+Return a JSON object containing a single key "ranked_products".
+The value must be a JSON array of objects, with each object containing ONLY the `rank` and `key`.
+The list MUST be sorted by rank.
 
 [Example JSON Output]
 ```json
 {{
-  "ranked_keys": ["most_similar_key", "next_most_similar_key"]
+  "ranked_products": [
+    {{
+      "rank": 1,
+      "key": "key_for_perfect_match"
+    }},
+    {{
+      "rank": 2,
+      "key": "key_for_good_match"
+    }}
+  ]
 }}
