@@ -162,7 +162,7 @@ class FilterService:
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nProduct {i+1}:\n"
-                    f"Name: {product.get('name1')}\n"
+                    f"Name: {product.get('name')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
