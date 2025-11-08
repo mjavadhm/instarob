@@ -67,7 +67,7 @@ class OpenRouterService:
 
             response_text = completion.choices[0].message.content.strip()
             logger.info(f"Raw OpenRouter Response (Caption Analysis): {response_text}")
-
+            response_text = response_text.strip().removeprefix("```json").removesuffix("```")
             parsed_json = json.loads(response_text)
             analysis_result = CaptionAnalysis(**parsed_json)
 

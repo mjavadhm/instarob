@@ -107,8 +107,8 @@ class ReelsService:
             edenai_response = await self.edenai_service.analyze_video_frames(video_base64, full_prompt)
 
             response_content = edenai_response['choices'][0]['message']['content']
+            logger.info(f"Raw EdenAI Response: {response_content}")
             response_text = response_content.strip().removeprefix("```json").removesuffix("```")
-            logger.info(f"Raw EdenAI Response: {response_text}")
 
             analysis_data = json.loads(response_text)
             analysis_result = FrameAnalysis(**analysis_data)
@@ -116,6 +116,8 @@ class ReelsService:
             prompt_tokens = edenai_response['usage']['prompt_tokens']
             response_tokens = edenai_response['usage']['completion_tokens']
             cost = edenai_response.get('cost', 0.0)
+            # logger.info(f"Raw EdenAI Response: {response_content}")
+            logger.info(f"EdenAI Response Cost: {cost}")
 
             return analysis_result, prompt_tokens, response_tokens, cost
         except Exception as e:
@@ -237,6 +239,9 @@ class ReelsService:
             logger.error(f"Critical error in video analysis workflow: {e}", exc_info=True)
             return SuggestionsOut(suggestions=[])
         finally:
+            request_frame_dir = self.frames_dir / request_id
+            if request_frame_dir.exists():
+                await asyncio.to_thread(shutil.rmtree, request_frame_dir)
             if video_path and os.path.exists(video_path):
                 await asyncio.to_thread(os.remove, video_path)
             duration = time.time() - request_start_time

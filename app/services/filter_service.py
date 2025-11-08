@@ -105,9 +105,9 @@ class FilterService:
                 response_format={"type": "json_object"},
             )
 
-            response_text = completion.choices[0].message.content.strip()
-            logger.info(f"Raw OpenRouter Final Ranking Response: {response_text}")
-
+            response_content = completion.choices[0].message.content.strip()
+            logger.info(f"Raw OpenRouter Final Ranking Response: {response_content}")
+            response_text = response_content.strip().removeprefix("```json").removesuffix("```")
             parsed_json = json.loads(response_text)
             ranked_keys = parsed_json.get("ranked_keys", [])
 

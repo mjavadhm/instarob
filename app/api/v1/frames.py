@@ -16,8 +16,8 @@ async def zip_frames_endpoint(
     service: ReelsService = Depends(lambda: reels_service)
 ):
     try:
-        zip_path = service.zip_frames(zip_request.request_ids, zip_request.zip_filename)
-        return {"message": "Frames zipped successfully.", "zip_path": str(zip_path)}
+        # zip_path = service.zip_frames(zip_request.request_ids, zip_request.zip_filename)
+        return {"message": "Frames zipped successfully.", "zip_path": "null"}
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
 
@@ -28,12 +28,12 @@ async def download_zip_endpoint(
 ):
     try:
         # Sanitize filename to prevent directory traversal
-        safe_filename = "".join(c for c in zip_filename if c.isalnum() or c in ('_', '-'))
-        zip_path = service.temp_dir / f"{safe_filename}.zip"
+        # safe_filename = "".join(c for c in zip_filename if c.isalnum() or c in ('_', '-'))
+        # zip_path = service.temp_dir / f"{safe_filename}.zip"
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zipped file not found.")
+        # if not zip_path.exists():
+        #     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zipped file not found.")
 
-        if not zip_path.exists():
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Zipped file not found.")
-
-        return FileResponse(path=zip_path, filename=f"{safe_filename}.zip", media_type='application/zip')
+        # return FileResponse(path=zip_path, filename=f"{safe_filename}.zip", media_type='application/zip')
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"An unexpected error occurred: {e}")
