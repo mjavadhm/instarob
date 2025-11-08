@@ -154,18 +154,26 @@ class FilterService:
 
             content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\n"})
 
+            image_urls = [p.get("image_url") for p in products if p.get("image_url")]
+            image_coroutines = [self._download_and_encode_image(url) for url in image_urls]
+            base64_images = await asyncio.gather(*image_coroutines)
+            url_to_base64_map = dict(zip(image_urls, base64_images))
+
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nProduct {i+1}:\n"
-                    f"Name: {product.get('title') or product.get('name')}\n"
+                    f"Name: {product.get('name1')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
-                if product.get("image_url"):
+                image_url = product.get("image_url")
+                if image_url and url_to_base64_map.get(image_url):
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": product.get("image_url")}
+                        "image_url": {"url": f"data:image/jpeg;base64,{url_to_base64_map[image_url]}"}
                     })
+                else:
+                    content.append({"type": "text", "text": "Image not available."})
 
             messages = [{"role": "user", "content": content}]
 

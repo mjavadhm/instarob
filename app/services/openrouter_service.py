@@ -111,7 +111,7 @@ class OpenRouterService:
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nProduct {i+1}:\n"
-                    f"Name: {product.get('name')}\n"
+                    f"Name: {product.get('name1')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
@@ -182,7 +182,7 @@ class OpenRouterService:
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nCandidate {i+1}:\n"
-                    f"Name: {product.get('title')}\n" # Note: Key is 'title' from image search results
+                    f"Name: {product.get('name1')}\n"
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
