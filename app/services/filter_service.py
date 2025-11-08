@@ -132,13 +132,17 @@ class FilterService:
         self,
         products: List[Dict[str, Any]],
         ground_truth_frame_paths: List[Path],
-        identified_product: str
+        identified_product: str,
+        product_description: str
     ) -> Tuple[List[str], int, int]:
         if not products:
             return [], 0, 0
 
         try:
-            prompt_text = self.prompt_template.format(identified_product=identified_product)
+            prompt_text = self.prompt_template.format(
+                identified_product=identified_product,
+                product_description=product_description
+            )
             content = [{"type": "text", "text": prompt_text}]
 
             for frame_path in ground_truth_frame_paths:
@@ -175,16 +179,17 @@ class FilterService:
 
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             parsed_json = json.loads(response_text)
-            ranked_keys = parsed_json.get("ranked_keys", [])
+            ranked_products = parsed_json.get("ranked_products", [])
 
             prompt_tokens = completion.usage.prompt_tokens
             completion_tokens = completion.usage.completion_tokens
 
-            if isinstance(ranked_keys, list):
+            if isinstance(ranked_products, list):
+                ranked_keys = [p.get("key") for p in ranked_products if p.get("key")]
                 logger.info(f"OpenRouter final ranking completed, returned {len(ranked_keys)} keys.")
                 return ranked_keys, prompt_tokens, completion_tokens
             else:
-                logger.warning(f"Final ranking response 'ranked_keys' was not a list: {ranked_keys}")
+                logger.warning(f"Final ranking response 'ranked_products' was not a list: {ranked_products}")
                 return [], prompt_tokens, completion_tokens
 
         except Exception as e:
@@ -197,7 +202,7 @@ class FilterService:
         ground_truth_frame_paths: List[Path],
         identified_product: str,
         product_description: str
-    ) -> Tuple[List[str], int, int, str]:
+    ) -> Tuple[List[str], int, int, str, float]:
         total_prompt_tokens = 0
         total_completion_tokens = 0
 
@@ -250,12 +255,15 @@ class FilterService:
             products=products_for_final_ranking,
             ground_truth_frame_paths=ground_truth_frame_paths,
             identified_product=identified_product,
+            product_description=product_description,
         )
         total_prompt_tokens += p_tokens
         total_completion_tokens += c_tokens
         final_ranking_cost = cost_service.calculate_cost(self.model_name, p_tokens, c_tokens)
         logger.info(f"Cost of final ranking stage: ${final_ranking_cost:.6f}")
 
-        return final_ranked_keys, total_prompt_tokens, total_completion_tokens, self.model_name
+        total_filter_service_cost = filtering_cost + final_ranking_cost
+
+        return final_ranked_keys, total_prompt_tokens, total_completion_tokens, self.model_name, total_filter_service_cost
 
 filter_service = FilterService()

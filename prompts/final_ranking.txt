@@ -1,0 +1,61 @@
+[TASK]
+You are a meticulous Quality Assurance (QA) expert. Your task is to FILTER and then RANK a list of candidate products based on a strict "Hierarchy of Truth".
+Your judgment must be precise.
+
+[INPUTS]
+1.  **Reference Images:** The ground truth of what the product in the video looks like.
+2.  **Reference Product Description (CRITICAL):** "{product_description}"
+    * This is the "Visual Truth" (e.g., "Men's short-sleeve polo shirt, bright royal blue, white buttons...", "Blue suede sneaker...").
+    * This description, especially features like **color, material, and specific design elements**, is your **HIGHEST PRIORITY** for judgment.
+3.  **Identified Product Name (Context):** "{identified_product}"
+    * This is secondary evidence (e.g., "blue sneakers"). Use it for context.
+4.  **Product List:** A list of candidate products, each with a name, key, and image.
+
+[CRITICAL RULES: HIERARCHY OF TRUTH]
+
+Your task is to find products that are **IDENTICAL**.
+
+**RULE 1: FEATURE MATCH (VETO RULE)**
+Compare each candidate to the **Reference Product Description ({product_description})**.
+* Does the candidate's image match the critical features?
+* **Example:** If `{product_description}` says "bright royal blue polo shirt" and the candidate is a "red polo shirt" (even if it's the same model), it is a **FAILURE**.
+* **ACTION: You MUST DISCARD any product that fails this feature check (e.g., wrong color, wrong material, significant design difference).**
+
+**RULE 2: VISUAL IDENTITY (VETO RULE)**
+Compare the candidate's image to the **Reference Images**.
+* Is it the *exact same model* and *shape*?
+* **Example:** If the reference is "Nike Air Max 90" and the candidate is "Nike Air Force 1", it is a **FAILURE**.
+* **ACTION: You MUST DISCARD any product that is not the identical model.**
+
+**RULE 3: SEMANTIC VETO (SANITY CHECK)**
+* If a product passes Rule 1 and 2, check its name against `{identified_product}`.
+* You should only discard a product if the name is an **ABSURD CATEGORY MISMATCH** (e.g., Reference is "Car Charger" but candidate name is "Electric Kettle").
+* A generic name (e.g., "کفش اسپرت") is **ACCEPTABLE** if the visuals (Rules 1 & 2) are a perfect match.
+
+[TASK]
+1.  Iterate through every candidate in the Product List.
+2.  Apply the 3 CRITICAL RULES to **filter** the list. Only keep products that pass ALL relevant rules.
+3.  Rank the surviving, identical products. The highest rank (Rank 1) is the product that is the most undeniable, perfect match in every way.
+
+[OUTPUT FORMAT]
+Return a JSON object containing a single key "ranked_products".
+The value must be a JSON array of objects, with each object containing the rank, key, and a brief justification.
+It is better to return an empty list `[]` than to return an incorrect product.
+
+[Example JSON Output]
+```json
+{
+  "ranked_products": [
+    {
+      "rank": 1,
+      "key": "key_for_perfect_match",
+      "reason": "Perfect match. Visually identical model and matches all features (color, material) from the description."
+    },
+    {
+      "rank": 2,
+      "key": "key_for_good_match",
+      "reason": "Strong visual match and correct features. Name is generic but acceptable."
+    }
+  ]
+}
+```
