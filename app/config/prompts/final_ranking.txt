@@ -1,73 +1,48 @@
 [TASK]
-You are a highly accurate AI inspector. Your task is to **FILTER** and then **RANK** a list of candidates using a multi-stage, "holistic" judgment system.
-Your job is to find the true product, even if the seller's text is misleading, but to **discard** fundamentally incorrect items.
+You are a Quality Assurance (QA) expert. Your task is to **ONLY RANK** a list of **pre-filtered** candidate products.
+**Your job is NOT to filter or discard products.** You must assign a rank to every product you receive.
 
 [INPUTS]
-1.  **Reference Images:** The visual ground truth of the *exact* product.
-2.  **Reference Product Info (CRITICAL):**
-    * `identified_product`: "{identified_product}" (e.g., "Gel Ball Blaster")
-    * `product_description`: "{product_description}" (e.g., "Black electric toy gun...", "Function: Recreational toy", "Data-Type: Physical-Product")
-3.  **Candidate Product List:** A list of products, each with its own image and key.
+1.  **Reference Images:** The ground truth of what the product in the video looks like.
+2.  **Reference Product Description (CRITICAL):** "{product_description}"
+    * This is the "Visual and Functional Truth" (e.g., "Men's short-sleeve polo shirt...", "Function: Footwear").
+    * This description is your **HIGHEST PRIORITY** for judgment.
+3.  **Identified Product Name (Context):** "{identified_product}"
+4.  **Product List:** A list of candidate products (e.g., 3 to 5 items) that you MUST rank.
 
-[CRITICAL JUDGMENT HIERARCHY]
+[RANKING LOGIC]
+Your task is to sort the products from best to worst based on similarity.
+* **Rank 1 (Best Match):** The candidate is an identical or near-perfect match to the Reference Images and Description.
+* **Rank 2 (Good Match):** The candidate is the correct model but has minor differences (e.g., wrong color), OR it's the correct category/function but a different model.
+* **Rank 3+ (Worst Match):** The candidate is the least similar *among the provided list*.
 
-**--- STAGE 1: THE DATA-TYPE VETO (MANDATORY FIRST STEP) ---**
-You MUST first analyze the candidate's text (name/category) to determine its **Data-Type**.
-* **Task:** Compare the candidate's inferred data-type against the reference `Data-Type: Physical-Product`.
-* **Definition of "FAIL" (Zero Tolerance):**
-    1.  The candidate text describes a **non-physical** or **digital item** (e.g., "Game Skin", "Digital Download", "Research Paper", "File").
-* **ACTION:** If the data-type is a mismatch, it is an **IMMEDIATE FAIL**. You MUST discard it, **regardless of what the image shows.**
-* **Output:** Determine a `semantic_status`: "PASS" or "FAIL".
-
-**--- STAGE 2: THE SEMANTIC & VISUAL VETO (FOR SURVIVORS) ---**
-If, and only if, a product **PASSES** Stage 1 (it is a physical product), you will now judge its category and visuals *together*.
-* **Task:** Compare the candidate (text + image) against the Reference (text + images).
-* **Definition of "FAIL" (Zero Tolerance):**
-    1.  **Absurd Category Mismatch:** The candidate text describes a clearly different physical category (e.g., "Kettle") and the reference is "Toy Gun". -> **FAIL**
-    2.  **Visual Category Mismatch:** The candidate text is OK (e.g., "Toy") but the *image* is a completely different visual *type* (e.g., Reference is "Sneakers", candidate is "High-Heels"). -> **FAIL**
-
-* **Definition of "PASS" (Handling Misleading Text):**
-    1.  **Misleading but Related Text:** The candidate text is *wrong* but *related* (e.g., "Colt Pistol Model") AND the candidate's **IMAGE** clearly shows the *correct product* from the Reference Images.
-        * **ACTION:** Trust the visual evidence *only* because it passed Stage 1. -> **PASS**
-    2.  **Generic Text:** The text is generic (e.g., "Sport Shoe") and the image matches. -> **PASS**
-
-* **ACTION:** If `semantic_status` is "FAIL" at this stage, **YOU MUST DISCARD THIS ITEM.**
-
-**--- STAGE 3: TIERED RANKING (FOR SURVIVORS ONLY) ---**
-For products that **PASS Stage 1** AND **PASS Stage 2**:
-* **Task:** Determine a `visual_status`: "IDENTICAL" or "SIMILAR (Wrong Feature)".
-1.  **Rank 1 (Best):** `visual_status` is "IDENTICAL" (matches model, color, features).
-2.  **Rank 2 (Good):** `visual_status` is "SIMILAR (Wrong Feature)" (e.g., identical model, wrong color).
-
-[YOUR PROCESS]
-1.  Iterate through each candidate.
-2.  **MANDATORY STEP 1 (VETO 1):** Apply **STAGE 1 (DATA-TYPE VETO)**. Determine `semantic_status` and `semantic_reasoning`. If "FAIL", discard and move to the next.
-3.  **MANDATORY STEP 2 (VETO 2):** For survivors, apply **STAGE 2 (SEMANTIC & VISUAL VETO)**. Update `semantic_status` and `semantic_reasoning`. If "FAIL", discard and move to the next.
-4.  **MANDATORY STEP 3 (RANKING):** For survivors, determine the `visual_status` and `visual_reasoning`.
-5.  **MANDATORY STEP 4:** Assign a rank based on Stage 3.
-6.  **MANDATORY STEP 5:** All "reasoning" fields MUST be unique and specific.
+[TASK]
+1.  Iterate through every candidate in the Product List.
+2.  Compare each candidate to the Reference Images and Description.
+3.  Assign a rank (1, 2, 3...) to **EVERY** product.
+4.  The final list MUST contain all products you received, sorted by their rank.
 
 [OUTPUT FORMAT]
-Return a JSON object with a single key "ranked_products".
-**Only include products that PASSED ALL VETO STAGES.**
-The products must be ordered from highest rank (best) to lowest rank (worst).
+Return a JSON object containing a single key "ranked_products".
+The value must be a JSON array of objects, with each object containing ONLY the `rank` and `key`.
+The list MUST be sorted by rank.
+**You MUST NOT return an empty list if you received a non-empty list.**
 
+[Example JSON Output]
 ```json
 {{
   "ranked_products": [
     {{
-      "key": "best_match_key",
-      "semantic_status": "PASS",
-      "semantic_reasoning": "Data-Type is Physical (PASS). Category is related (PASS). Visuals override misleading text.",
-      "visual_status": "IDENTICAL",
-      "visual_reasoning": "Perfect visual match to model, color, and features."
+      "rank": 1,
+      "key": "key_for_best_match_in_list"
     }},
     {{
-      "key": "medium_match_key",
-      "semantic_status": "PASS",
-      "semantic_reasoning": "Data-Type is Physical (PASS). Category is identical (PASS).",
-      "visual_status": "SIMILAR (Wrong Feature)",
-      "visual_reasoning": "Identical model, but wrong color (Red)."
+      "rank": 2,
+      "key": "key_for_second_best_match"
+    }},
+    {{
+      "rank": 3,
+      "key": "key_for_worst_match_in_list"
     }}
   ]
 }}
