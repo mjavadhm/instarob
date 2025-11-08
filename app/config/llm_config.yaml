@@ -11,6 +11,10 @@ text_result_filter_openrouter:
   model: "google/gemini-2.5-flash"
   prompt_file: "prompts/text_result_filter.txt"
 
+image_search_filter:
+  model: "google/gemini-2.5-flash"
+  prompt_file: "prompts/image_search_filter.txt"
+
 final_ranking_openrouter:
   model: "google/gemini-2.5-flash"
   prompt_file: "prompts/final_ranking.txt"

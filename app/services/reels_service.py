@@ -227,7 +227,12 @@ class ReelsService:
             if not product_list_to_rank:
                 logger.info("No candidate products found to rank. Skipping final ranking.")
             else:
-                ranked_keys, r_p, r_c, r_model = await filter_service.rank_products_with_llm(product_list_to_rank, frame_paths, analysis_result.identified_product)
+                ranked_keys, r_p, r_c, r_model = await filter_service.filter_and_rank_products(
+                    products=product_list_to_rank,
+                    ground_truth_frame_paths=frame_paths,
+                    identified_product=analysis_result.identified_product,
+                    product_description=analysis_result.product_description
+                )
                 prompt_token_total += r_p
                 response_token_total += r_c
                 total_cost += cost_service.calculate_cost(r_model, r_p, r_c)

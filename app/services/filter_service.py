@@ -11,6 +11,7 @@ from openai import AsyncOpenAI
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.core.utils import async_retry
+from app.services.openrouter_service import openrouter_service
 
 logger = get_logger()
 
@@ -51,17 +52,94 @@ class FilterService:
             logger.error(f"Failed to download or encode image from {url}: {e}", exc_info=True)
             return None
 
+    # @async_retry()
+    # async def rank_products_with_llm(
+    #     self,
+    #     products: List[Dict[str, Any]],
+    #     ground_truth_frame_paths: List[Path],
+    #     identified_product: str
+    # ) -> Tuple[List[str], int, int, str]:
+    #     try:
+    #         prompt_text = self.prompt_template.format(identified_product=identified_product)
+
+    #         content = [{"type": "text", "text": prompt_text}]
+    #         for frame_path in ground_truth_frame_paths:
+    #             base64_image = await self._image_to_base64(frame_path)
+    #             content.append({
+    #                 "type": "image_url",
+    #                 "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+    #             })
+
+    #         content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\nHere are the candidate products. Please rank them based on their visual similarity to the product in the reference images."})
+
+    #         image_urls = [p.get("image_url") for p in products if p.get("image_url")]
+    #         image_coroutines = [self._download_and_encode_image(url) for url in image_urls]
+    #         base64_images = await asyncio.gather(*image_coroutines)
+    #         url_to_base64_map = dict(zip(image_urls, base64_images))
+
+    #         for i, product in enumerate(products):
+    #             product_info = (
+    #                 f"\n\nProduct {i+1}:\n"
+    #                 f"Name: {product.get('name')}\n"
+    #                 f"Random Key: {product.get('random_key')}"
+    #             )
+    #             content.append({"type": "text", "text": product_info})
+    #             image_url = product.get("image_url")
+    #             if image_url and url_to_base64_map.get(image_url):
+    #                 content.append({
+    #                     "type": "image_url",
+    #                     "image_url": {"url": f"data:image/jpeg;base64,{url_to_base64_map[image_url]}"}
+    #                 })
+    #             else:
+    #                 content.append({"type": "text", "text": "Image not available."})
+
+    #         messages = [{"role": "user", "content": content}]
+
+    #         logger.info(f"Sending async request to OpenRouter for final ranking with {len(products)} products.")
+    #         completion = await self.client.chat.completions.create(
+    #             model=self.model_name,
+    #             messages=messages,
+    #             extra_headers={
+    #                 "HTTP-Referer": "https://instarob.ai",
+    #                 "X-Title": "Instarob AI",
+    #             },
+    #             response_format={"type": "json_object"},
+    #         )
+
+    #         response_content = completion.choices[0].message.content.strip()
+    #         logger.info(f"Raw OpenRouter Final Ranking Response: {response_content}")
+    #         response_text = response_content.strip().removeprefix("```json").removesuffix("```")
+    #         parsed_json = json.loads(response_text)
+    #         ranked_keys = parsed_json.get("ranked_keys", [])
+
+    #         prompt_tokens = completion.usage.prompt_tokens
+    #         completion_tokens = completion.usage.completion_tokens
+
+    #         if isinstance(ranked_keys, list) and all(isinstance(k, str) for k in ranked_keys):
+    #             logger.info(f"OpenRouter ranked {len(ranked_keys)} products.")
+    #             return ranked_keys, prompt_tokens, completion_tokens, self.model_name
+    #         else:
+    #             logger.warning(f"OpenRouter response key 'ranked_keys' was not a list of strings: {ranked_keys}")
+    #             return [], prompt_tokens, completion_tokens, self.model_name
+
+    #     except json.JSONDecodeError as e:
+    #         logger.error(f"Failed to decode JSON response from OpenRouter: {e}", exc_info=True)
+    #         return [], 0, 0, self.model_name
+
     @async_retry()
-    async def rank_products_with_llm(
+    async def _final_rank_products(
         self,
         products: List[Dict[str, Any]],
         ground_truth_frame_paths: List[Path],
         identified_product: str
-    ) -> Tuple[List[str], int, int, str]:
+    ) -> Tuple[List[str], int, int]:
+        if not products:
+            return [], 0, 0
+
         try:
             prompt_text = self.prompt_template.format(identified_product=identified_product)
-
             content = [{"type": "text", "text": prompt_text}]
+
             for frame_path in ground_truth_frame_paths:
                 base64_image = await self._image_to_base64(frame_path)
                 content.append({
@@ -69,28 +147,20 @@ class FilterService:
                     "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
                 })
 
-            content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\nHere are the candidate products. Please rank them based on their visual similarity to the product in the reference images."})
-
-            image_urls = [p.get("image_url") for p in products if p.get("image_url")]
-            image_coroutines = [self._download_and_encode_image(url) for url in image_urls]
-            base64_images = await asyncio.gather(*image_coroutines)
-            url_to_base64_map = dict(zip(image_urls, base64_images))
+            content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\n"})
 
             for i, product in enumerate(products):
                 product_info = (
                     f"\n\nProduct {i+1}:\n"
-                    f"Name: {product.get('name')}\n"
+                    f"Name: {product.get('title')}\n" # Note: title from image search
                     f"Random Key: {product.get('random_key')}"
                 )
                 content.append({"type": "text", "text": product_info})
-                image_url = product.get("image_url")
-                if image_url and url_to_base64_map.get(image_url):
+                if product.get("image_url"):
                     content.append({
                         "type": "image_url",
-                        "image_url": {"url": f"data:image/jpeg;base64,{url_to_base64_map[image_url]}"}
+                        "image_url": {"url": product.get("image_url")}
                     })
-                else:
-                    content.append({"type": "text", "text": "Image not available."})
 
             messages = [{"role": "user", "content": content}]
 
@@ -98,31 +168,87 @@ class FilterService:
             completion = await self.client.chat.completions.create(
                 model=self.model_name,
                 messages=messages,
-                extra_headers={
-                    "HTTP-Referer": "https://instarob.ai",
-                    "X-Title": "Instarob AI",
-                },
+                extra_headers={"HTTP-Referer": "https://instarob.ai", "X-Title": "Instarob AI"},
                 response_format={"type": "json_object"},
             )
 
-            response_content = completion.choices[0].message.content.strip()
-            logger.info(f"Raw OpenRouter Final Ranking Response: {response_content}")
-            response_text = response_content.strip().removeprefix("```json").removesuffix("```")
+            response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             parsed_json = json.loads(response_text)
             ranked_keys = parsed_json.get("ranked_keys", [])
 
             prompt_tokens = completion.usage.prompt_tokens
             completion_tokens = completion.usage.completion_tokens
 
-            if isinstance(ranked_keys, list) and all(isinstance(k, str) for k in ranked_keys):
-                logger.info(f"OpenRouter ranked {len(ranked_keys)} products.")
-                return ranked_keys, prompt_tokens, completion_tokens, self.model_name
+            if isinstance(ranked_keys, list):
+                logger.info(f"OpenRouter final ranking completed, returned {len(ranked_keys)} keys.")
+                return ranked_keys, prompt_tokens, completion_tokens
             else:
-                logger.warning(f"OpenRouter response key 'ranked_keys' was not a list of strings: {ranked_keys}")
-                return [], prompt_tokens, completion_tokens, self.model_name
+                logger.warning(f"Final ranking response 'ranked_keys' was not a list: {ranked_keys}")
+                return [], prompt_tokens, completion_tokens
 
-        except json.JSONDecodeError as e:
-            logger.error(f"Failed to decode JSON response from OpenRouter: {e}", exc_info=True)
-            return [], 0, 0, self.model_name
+        except Exception as e:
+            logger.error(f"An error occurred during final ranking: {e}", exc_info=True)
+            return [], 0, 0
+
+    async def filter_and_rank_products(
+        self,
+        products: List[Dict[str, Any]],
+        ground_truth_frame_paths: List[Path],
+        identified_product: str,
+        product_description: str
+    ) -> Tuple[List[str], int, int, str]:
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+
+        # Step 1: Take top 20 products for intermediate filtering
+        products_to_filter = products[:20]
+
+        # Step 2: Create batches of 5
+        batches = [products_to_filter[i:i + 5] for i in range(0, len(products_to_filter), 5)]
+
+        # Step 3: Run filtering in parallel
+        filter_tasks = []
+        for batch in batches:
+            if batch:
+                task = openrouter_service.filter_image_search_results(
+                    products=batch,
+                    frame_paths=ground_truth_frame_paths,
+                    identified_product=identified_product,
+                    product_description=product_description
+                )
+                filter_tasks.append(task)
+
+        logger.info(f"Starting parallel filtering for {len(filter_tasks)} batches.")
+        filter_results = await asyncio.gather(*filter_tasks, return_exceptions=True)
+
+        # Step 4: Aggregate results
+        intermediate_ranked_keys = []
+        for result in filter_results:
+            if isinstance(result, Exception):
+                logger.error(f"An exception occurred during parallel filtering: {result}", exc_info=True)
+            else:
+                keys, p_tokens, c_tokens = result
+                intermediate_ranked_keys.extend(keys)
+                total_prompt_tokens += p_tokens
+                total_completion_tokens += c_tokens
+
+        # Deduplicate keys while preserving order
+        unique_keys = list(dict.fromkeys(intermediate_ranked_keys))
+        logger.info(f"Aggregated {len(unique_keys)} unique products after intermediate filtering.")
+
+        # Map keys back to product objects
+        products_by_key = {p["random_key"]: p for p in products}
+        products_for_final_ranking = [products_by_key[key] for key in unique_keys if key in products_by_key]
+
+        # Step 5: Perform final ranking on the aggregated list
+        final_ranked_keys, p_tokens, c_tokens = await self._final_rank_products(
+            products=products_for_final_ranking,
+            ground_truth_frame_paths=ground_truth_frame_paths,
+            identified_product=identified_product,
+        )
+        total_prompt_tokens += p_tokens
+        total_completion_tokens += c_tokens
+
+        return final_ranked_keys, total_prompt_tokens, total_completion_tokens, self.model_name
 
 filter_service = FilterService()
