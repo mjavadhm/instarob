@@ -212,17 +212,17 @@ class OpenRouterService:
             logger.info(f"Raw OpenRouter Response (Image Filter): {response_text}")
 
             parsed_json = json.loads(response_text)
-            ranked_products = parsed_json.get("ranked_products", [])
+            passed_products = parsed_json.get("passed_products", [])
 
             prompt_tokens = completion.usage.prompt_tokens
             completion_tokens = completion.usage.completion_tokens
 
-            if isinstance(ranked_products, list):
-                ranked_keys = [p.get("key") for p in ranked_products if p.get("key")]
-                logger.info(f"OpenRouter filtered and ranked {len(ranked_keys)} products from image search.")
+            if isinstance(passed_products, list):
+                ranked_keys = [p.get("key") for p in passed_products if p.get("key")]
+                logger.info(f"OpenRouter filtered down to {len(ranked_keys)} products from image search.")
                 return ranked_keys, prompt_tokens, completion_tokens
             else:
-                logger.warning(f"OpenRouter response key 'ranked_products' was not a list of objects: {ranked_products}")
+                logger.warning(f"OpenRouter response key 'passed_products' was not a list of objects: {passed_products}")
                 return [], prompt_tokens, completion_tokens
 
         except (json.JSONDecodeError, ValidationError) as e:

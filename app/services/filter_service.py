@@ -5,6 +5,7 @@ import asyncio
 import base64
 import aiofiles
 from pathlib import Path
+from pydantic import ValidationError
 from typing import List, Dict, Any, Tuple, Optional
 from openai import AsyncOpenAI
 
@@ -201,8 +202,8 @@ class FilterService:
                 logger.warning(f"Final ranking response 'ranked_products' was not a list: {ranked_products}")
                 return [], prompt_tokens, completion_tokens
 
-        except Exception as e:
-            logger.error(f"An error occurred during final ranking: {e}", exc_info=True)
+        except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as e:
+            logger.error(f"Failed to decode or parse JSON response from OpenRouter: {e}", exc_info=True)
             return [], 0, 0
 
     async def filter_image_products_parallel(

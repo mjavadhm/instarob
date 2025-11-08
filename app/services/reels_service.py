@@ -13,7 +13,9 @@ from urllib.parse import urlparse
 import base64
 import google.generativeai as genai
 import uuid
-
+from app.core.utils import async_retry
+from pydantic import ValidationError
+import json
 
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -95,7 +97,8 @@ class ReelsService:
             for frame_info in analysis_result.best_frames
             if (request_frame_dir / f"{sanitized_product_name}_{frame_info.rank}.jpg").exists()
         ]
-
+    
+    @async_retry()
     async def _analyze_video_path(self, reel_in: ReelIn, video_path: Path) -> Tuple[Optional[FrameAnalysis], int, int, float]:
         try:
             async with aiofiles.open(video_path, "rb") as f:
@@ -120,7 +123,7 @@ class ReelsService:
             logger.info(f"EdenAI Response Cost: {cost}")
 
             return analysis_result, prompt_tokens, response_tokens, cost
-        except Exception as e:
+        except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as e:
             logger.error(f"Error in _analyze_video_path with EdenAI: {e}", exc_info=True)
             return None, 0, 0, 0.0
 

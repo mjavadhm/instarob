@@ -2,6 +2,7 @@ import asyncio
 from functools import wraps
 from typing import Callable, Awaitable, Any
 from openai import APIConnectionError, APITimeoutError, APIStatusError
+import httpx
 from app.core.logging import get_logger
 
 logger = get_logger()
@@ -13,7 +14,7 @@ def async_retry(max_retries: int = 2, delay: int = 1):
             for attempt in range(max_retries + 1):
                 try:
                     return await func(*args, **kwargs)
-                except (APIConnectionError, APITimeoutError) as e:
+                except (APIConnectionError, APITimeoutError, httpx.RequestError) as e:
                     if attempt == max_retries:
                         logger.error(f"Attempt {attempt + 1}/{max_retries + 1} failed with network error. Max retries reached.")
                         raise
