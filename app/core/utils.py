@@ -16,7 +16,8 @@ def async_retry(max_retries: int = 2, delay: int = 1):
                     return await func(*args, **kwargs)
                 except (APIConnectionError, APITimeoutError, httpx.RequestError) as e:
                     if attempt == max_retries:
-                        logger.error(f"Attempt {attempt + 1}/{max_retries + 1} failed with network error. Max retries reached.")
+                        # logger.warning(f"Attempt {attempt + 1}/{max_retries + 1} failed with network error. Max retries reached.")
+                        logger.error(f"Attempt {attempt + 1}/{max_retries + 1} failed with network error. Max retries reached.err: {str(e)}")
                         raise
                     logger.warning(f"Attempt {attempt + 1}/{max_retries + 1} failed with network error: {e}. Retrying in {delay}s...")
                     await asyncio.sleep(delay)

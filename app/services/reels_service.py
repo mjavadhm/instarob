@@ -100,7 +100,7 @@ class ReelsService:
             if (request_frame_dir / f"{sanitized_product_name}_{frame_info.rank}.jpg").exists()
         ]
     
-    @async_retry()
+    # @async_retry()
     async def _analyze_video_path(self, reel_in: ReelIn, video_path: Path) -> Tuple[Optional[FrameAnalysis], int, int, float]:
         try:
             async with aiofiles.open(video_path, "rb") as f:
@@ -135,7 +135,7 @@ class ReelsService:
             logger.info(f"EdenAI Response Cost: {cost}")
 
             return analysis_result, prompt_tokens, response_tokens, cost
-        except (json.JSONDecodeError, ValidationError, KeyError, TypeError) as e:
+        except Exception as e:
             logger.error(f"Error in _analyze_video_path with EdenAI: {e}", exc_info=True)
             return None, 0, 0, 0.0
 
