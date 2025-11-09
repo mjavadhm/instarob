@@ -1,6 +1,7 @@
 import yaml
 import json
 import httpx
+import re
 import asyncio
 import base64
 import aiofiles
@@ -188,6 +189,7 @@ class FilterService:
             )
 
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
+            response_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', response_text)
             parsed_json = json.loads(response_text)
             ranked_products = parsed_json.get("ranked_products", [])
 

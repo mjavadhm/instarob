@@ -5,6 +5,7 @@ import os
 import aiofiles
 import asyncio
 import cv2
+import re
 import shutil
 import time
 from pathlib import Path
@@ -49,13 +50,14 @@ class ReelsService:
 
         self.edenai_service = EdenAIService()
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
-
+    
+    @async_retry()
     async def _download_video(self, url: str, request_id: str) -> Path:
         local_path = self.temp_dir / f"{request_id}{os.path.splitext(urlparse(url).path)[1] or '.mp4'}"
         headers = {"User-Agent": "Mozilla/5.0"}
         logger.info(f"Starting video download from {url} to {local_path}...")
         try:
-            async with httpx.AsyncClient() as client, client.stream("GET", url, headers=headers, follow_redirects=True, timeout=60.0) as response:
+            async with httpx.AsyncClient() as client, client.stream("GET", url, headers=headers, follow_redirects=True, timeout=10.0) as response:
                 response.raise_for_status()
                 async with aiofiles.open(local_path, "wb") as f:
                     async for chunk in response.aiter_bytes():
@@ -64,7 +66,7 @@ class ReelsService:
             return local_path
         except httpx.HTTPError as e:
             logger.error(f"HTTP error downloading video: {e}", exc_info=True)
-            raise
+            return None
 
     def _extract_and_save_frames(self, video_path: Path, analysis: FrameAnalysis, request_id: str):
         if not analysis.identified_product:
@@ -109,9 +111,19 @@ class ReelsService:
 
             edenai_response = await self.edenai_service.analyze_video_frames(video_base64, full_prompt)
 
+            if not edenai_response.get('choices') or \
+               not isinstance(edenai_response['choices'], list) or \
+               len(edenai_response['choices']) == 0 or \
+               not edenai_response['choices'][0].get('message') or \
+               not edenai_response['choices'][0]['message'].get('content'):
+                
+                logger.warning(f"EdenAI did not return a valid 'choices' structure. Response: {edenai_response}")
+                return None, 0, 0, 0.0
+            
             response_content = edenai_response['choices'][0]['message']['content']
             logger.info(f"Raw EdenAI Response: {response_content}")
             response_text = response_content.strip().removeprefix("```json").removesuffix("```")
+            response_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', response_text)
 
             analysis_data = json.loads(response_text)
             analysis_result = FrameAnalysis(**analysis_data)
@@ -141,36 +153,24 @@ class ReelsService:
         response_token_total = 0
 
         try:
+            caption_analysis_task = asyncio.create_task(self._analyze_caption_path(reel_in))
+            
             video_path = await self._download_video(str(reel_in.url), request_id)
 
-            # --- Parallel Analysis ---
-            video_analysis_task = asyncio.create_task(self._analyze_video_path(reel_in, video_path))
-            caption_analysis_task = asyncio.create_task(self._analyze_caption_path(reel_in))
-
-            results = await asyncio.gather(video_analysis_task, caption_analysis_task, return_exceptions=True)
-
-            # --- Process Video Analysis Results ---
-            video_result = results[0]
-            analysis_result = None
-            frame_paths = []
-
-            if isinstance(video_result, Exception):
-                logger.error(f"Video analysis path failed critically: {video_result}", exc_info=video_result)
-            elif not video_result[0]:
-                logger.warning("Video analysis returned no result.")
+            video_analysis_task = None
+            if video_path:
+                video_analysis_task = asyncio.create_task(self._analyze_video_path(reel_in, video_path))
             else:
-                analysis_result, v_prompt, v_resp, v_cost = video_result
-                prompt_token_total += v_prompt
-                response_token_total += v_resp
-                total_cost += v_cost
-                await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, request_id)
-                frame_paths = await asyncio.to_thread(self._get_frame_paths, request_id, analysis_result)
+                logger.warning("Video download failed, skipping video analysis.")
             
-            if analysis_result is None:
-                analysis_result = FrameAnalysis(identified_product=None, best_frames=[])
+            tasks_to_gather = [caption_analysis_task]
+            if video_analysis_task:
+                tasks_to_gather.append(video_analysis_task)
 
-            # --- Process Caption Analysis Results ---
-            caption_result = results[1]
+            results = await asyncio.gather(*tasks_to_gather, return_exceptions=True)
+
+            
+            caption_result = results[0]
             caption_search_query = None
             if isinstance(caption_result, Exception):
                 logger.warning(f"Caption analysis path failed: {caption_result}", exc_info=caption_result)
@@ -184,25 +184,51 @@ class ReelsService:
                     total_cost += cost
                     logger.info(f"Cost of caption analysis: ${cost:.6f}")
 
-            # --- Concurrent Searches ---
-            image_search_tasks = [product_service.search_product(fp, analysis_result.identified_product) for fp in frame_paths]
+            analysis_result = None
+            frame_paths = []
+            video_result = None
+            
+            if video_analysis_task and len(results) > 1:
+                video_result = results[1]
+            if video_result:
+                if isinstance(video_result, Exception):
+                    logger.error(f"Video analysis path failed critically: {video_result}", exc_info=video_result)
+                elif not video_result[0]:
+                    logger.warning("Video analysis returned no result.")
+                else:
+                    analysis_result, v_prompt, v_resp, v_cost = video_result
+                    prompt_token_total += v_prompt
+                    response_token_total += v_resp
+                    total_cost += v_cost
+                    if video_path: 
+                        await asyncio.to_thread(self._extract_and_save_frames, video_path, analysis_result, request_id)
+                        frame_paths = await asyncio.to_thread(self._get_frame_paths, request_id, analysis_result)
+            
+            if analysis_result is None:
+                analysis_result = FrameAnalysis(identified_product=None, best_frames=[])
 
-            text_search_task = None
+
+            
+            search_tasks_to_gather = [product_service.search_product(fp, analysis_result.identified_product) for fp in frame_paths]
+            
             if caption_search_query:
-                text_search_task = product_service.search_on_torob_by_text(caption_search_query)
+                search_tasks_to_gather.append(product_service.search_on_torob_by_text(caption_search_query))
 
-            search_results = await asyncio.gather(*image_search_tasks, text_search_task, return_exceptions=True)
+            search_results = []
+            if search_tasks_to_gather:
+                search_results = await asyncio.gather(*search_tasks_to_gather, return_exceptions=True)
 
-            # --- Process Search Results ---
-            image_search_results = [r for r in search_results[:len(image_search_tasks)] if not isinstance(r, Exception)]
+            num_image_tasks = len(frame_paths)
+            image_search_results = [r for r in search_results[:num_image_tasks] if not isinstance(r, Exception)]
 
             text_search_products = []
-            if text_search_task:
-                text_result = search_results[-1]
-                if isinstance(text_result, Exception):
-                    logger.warning(f"Text search failed: {text_result}", exc_info=text_result)
-                elif text_result:
-                    text_search_products = text_result
+            if caption_search_query:
+                if len(search_results) > num_image_tasks:
+                    text_result = search_results[-1]
+                    if isinstance(text_result, Exception):
+                        logger.warning(f"Text search failed: {text_result}", exc_info=text_result)
+                    elif text_result:
+                        text_search_products = text_result
 
             # --- Filter Text Search (if applicable) ---
             filtered_text_products = []

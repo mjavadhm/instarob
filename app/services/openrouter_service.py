@@ -1,6 +1,7 @@
 import yaml
 import json
 import httpx
+import re
 import aiofiles
 import base64
 from pathlib import Path
@@ -75,6 +76,7 @@ class OpenRouterService:
             response_text = completion.choices[0].message.content.strip()
             logger.info(f"Raw OpenRouter Response (Caption Analysis): {response_text}")
             response_text = response_text.strip().removeprefix("```json").removesuffix("```")
+            response_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', response_text)
             parsed_json = json.loads(response_text)
             analysis_result = CaptionAnalysis(**parsed_json)
 
@@ -137,6 +139,7 @@ class OpenRouterService:
             )
 
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
+            response_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', response_text)
             logger.info(f"Raw OpenRouter Response (Text Filter): {response_text}")
 
             parsed_json = json.loads(response_text)
@@ -209,6 +212,7 @@ class OpenRouterService:
             )
 
             response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
+            response_text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', response_text)
             logger.info(f"Raw OpenRouter Response (Image Filter): {response_text}")
 
             parsed_json = json.loads(response_text)

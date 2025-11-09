@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, HttpUrl
+from typing import Optional
 
 class ReelIn(BaseModel):
-    text: str = Field(..., min_length=1, max_length=2200)
+    text: Optional[str] = Field(default=None, max_length=2200)
     url: HttpUrl
