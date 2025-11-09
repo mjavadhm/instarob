@@ -3,25 +3,27 @@ from app.models.reel_in import ReelIn
 from app.models.suggestions_out import SuggestionsOut
 from app.services.reels_service import reels_service, ReelsService
 import asyncio
+from app.core.logging import get_logger
+
+logger = get_logger()
 
 router = APIRouter()
 
 @router.post("/", response_model=SuggestionsOut, status_code=status.HTTP_200_OK)
 async def analyze_reel(
     reel_in: ReelIn,
-    service: ReelsService = Depends(lambda: reels_service),
-    timeout=60.0
+    service: ReelsService = Depends(lambda: reels_service)
 ):
     try:
         analysis_result = await asyncio.wait_for(
             service.analyze_reel_video(reel_in),
-            timeout=60.0  # تایم‌اوت سراسری 60 ثانیه
+            timeout=60.0
         )
         return analysis_result
     except asyncio.TimeoutError:
-        # logger.error("Request timed out after 60 seconds.") # خطای تایم‌اوت را لاگ کنید
+        logger.error("Request timed out after 60 seconds.")
         raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT, # یا 408
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
             detail="Request processing timed out after 60 seconds."
         )
     except RuntimeError as e:
