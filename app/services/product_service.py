@@ -3,7 +3,7 @@ import httpx
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import base64
-from httpx_socks import AsyncProxyTransport
+import asyncio
 
 from app.core.logging import get_logger
 
@@ -11,8 +11,24 @@ logger = get_logger()
 
 class ProductService:
     def __init__(self):
-        pass
+        self.torob_headers = {
+            "x-hackathon-key": "KDwavVLtDr4qwEiohTsYBcNW3MxDxbBxGfdaoGHF8FDuqBcD3V7jMsV4utd65PJv"
+        }
+        self.max_retries = 3
 
+    async def _request_with_retry(self, client_method, *args, **kwargs):
+        for attempt in range(self.max_retries):
+            try:
+                response = await client_method(*args, **kwargs)
+                response.raise_for_status()
+                return response
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code == 408 and attempt < self.max_retries - 1:
+                    logger.warning(f"Torob API returned 408. Retrying ({attempt + 1}/{self.max_retries - 1})...")
+                    await asyncio.sleep(1)  # simple backoff
+                    continue
+                raise
+        return None
 
     async def send_frame(self, frame_path: Path, text_prompt: str) -> Optional[str]:
         """Sends a frame to the external detection service and returns the base64 encoded image if successful."""
@@ -31,7 +47,6 @@ class ProductService:
                     response_data = response.json()
 
                     if isinstance(response_data, list) and len(response_data) > 0:
-                        # Assuming the first item is the one with the highest score as per the documentation
                         best_match = response_data[0]
                         if "image_base64" in best_match:
                             logger.info("Successfully received base64 image from detection service.")
@@ -54,13 +69,11 @@ class ProductService:
             return None
         
     async def convert_file_to_base64_async(self, file_path: Path) -> Optional[str]:
-        
         try:
             async with aiofiles.open(file_path, "rb") as f:
                 image_bytes = await f.read()
                 base64_bytes = base64.b64encode(image_bytes)
                 return base64_bytes.decode('utf-8')
-                
         except FileNotFoundError:
             logger.error(f"Error: File not found at {file_path}")
             return None
@@ -71,16 +84,15 @@ class ProductService:
     async def upload_to_torob(self, image_base64: str) -> Optional[str]:
         """Uploads a base64 encoded image to Torob's image upload API."""
         torob_url = "https://api.torob.com/v4/base-product/search-image-upload/"
-        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
         try:
             image_data = base64.b64decode(image_base64)
             files = {'img': ('image.jpg', image_data, 'image/jpeg')}
 
-            async with httpx.AsyncClient(transport=transport) as client:
+            async with httpx.AsyncClient() as client:
                 logger.info("Uploading image to Torob...")
-                response = await client.post(torob_url, files=files, timeout=40)
-                response.raise_for_status()
+                response = await self._request_with_retry(client.post, torob_url, files=files, headers=self.torob_headers, timeout=40)
+                if not response: return None
 
                 response_data = response.json()
                 image_url = response_data.get("image_url")
@@ -91,7 +103,6 @@ class ProductService:
                 else:
                     logger.error(f"Torob upload API did not return an 'image_url'. Response: {response_data}")
                     return None
-
         except httpx.HTTPStatusError as e:
             logger.error(f"HTTP error while uploading to Torob: {e.response.status_code} - {e.response.text}")
             return None
@@ -105,13 +116,12 @@ class ProductService:
         along with the URL of the image that was searched.
         """
         torob_url = f"https://api.torob.com/v4/base-product/search-by-image/?image_url={image_url}"
-        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
         try:
-            async with httpx.AsyncClient(transport=transport) as client:
+            async with httpx.AsyncClient() as client:
                 logger.info(f"Searching on Torob with image URL: {image_url}")
-                response = await client.get(torob_url, timeout=40)
-                response.raise_for_status()
+                response = await self._request_with_retry(client.get, torob_url, headers=self.torob_headers, timeout=40)
+                if not response: return None
 
                 results = response.json()
 
@@ -122,7 +132,7 @@ class ProductService:
                             "name": result.get("name1"),
                             "link": f"https://torob.com{result.get('web_client_absolute_url')}",
                             "random_key": result.get("random_key"),
-                            "rank": i + 1  # Add rank based on position
+                            "rank": i + 1
                         }
                         for i, result in enumerate(all_results)
                     ]
@@ -146,13 +156,12 @@ class ProductService:
     async def search_on_torob_by_text(self, query: str) -> Optional[List[Dict[str, Any]]]:
         """Searches Torob by a text query and returns up to 10 non-advertisement products, including their image URLs."""
         search_url = f"https://api.torob.com/v4/base-product/search/?q={query}&size=100&page=1"
-        transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
         try:
-            async with httpx.AsyncClient(transport=transport) as client:
+            async with httpx.AsyncClient() as client:
                 logger.info(f"Searching on Torob with text query: '{query}'")
-                response = await client.get(search_url, timeout=40)
-                response.raise_for_status()
+                response = await self._request_with_retry(client.get, search_url, headers=self.torob_headers, timeout=40)
+                if not response: return None
 
                 data = response.json()
                 results = data.get("results", [])
@@ -184,26 +193,16 @@ class ProductService:
             return None
 
     async def search_product(self, frame_path: Path, text_prompt: str) -> Optional[Dict[str, Any]]:
-        """
-        Orchestrates the full product search workflow:
-        1. Sends a frame for detection.
-        2. Uploads the resulting base64 image to Torob.
-        3. Searches Torob with the uploaded image URL.
-        """
-        # 1. Get the base64 encoded image from the detection service
-        # image_base64 = await self.send_frame(frame_path, text_prompt)
         image_base64 = await self.convert_file_to_base64_async(frame_path)
         if not image_base64:
             logger.error("Failed to get base64 image from detection service. Aborting product search.")
             return None
 
-        # 2. Upload the image to Torob
         image_url = await self.upload_to_torob(image_base64)
         if not image_url:
             logger.error("Failed to upload image to Torob. Aborting product search.")
             return None
 
-        # 3. Search for the product on Torob
         product_info = await self.search_on_torob(image_url)
         if not product_info:
             logger.warning("Failed to find product information on Torob.")

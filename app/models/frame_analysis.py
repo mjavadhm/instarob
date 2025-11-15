@@ -9,7 +9,6 @@ class BestFrame(BaseModel):
 class FrameAnalysis(BaseModel):
     identified_product: str
     product_description: Optional[str] = Field(None, description="Detailed visual description from the LLM.")
-    search_query_persian: Optional[str] = Field(None, description="The Persian query suggested for text-based search.")
     best_frames: List[BestFrame]
     product_info: Optional[List[Dict[str, Any]]] = Field(None, description="Product information from Torob search.")
     prompt_token_count: Optional[int] = Field(None, description="Token count for the input prompt.")
