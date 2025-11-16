@@ -1,113 +1,126 @@
 import yaml
 import json
+import httpx
+import asyncio
+import base64
+import aiofiles
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Tuple
-import google.generativeai as genai
-from google.generativeai.types import GenerateContentResponse
+from typing import List, Dict, Any, Tuple, Optional
+from openai import AsyncOpenAI
 
+from app.core.config import settings
 from app.core.logging import get_logger
 
 logger = get_logger()
 
 class FilterService:
     def __init__(self):
-        # Load LLM and prompt configuration
         config_path = Path(__file__).parent.parent / "config" / "llm_config.yaml"
         prompt_dir = config_path.parent
         with open(config_path, "r") as f:
-            self.llm_config = yaml.safe_load(f).get("product_filter", {})
+            self.llm_config = yaml.safe_load(f).get("final_ranking_openrouter", {})
 
-        prompt_file = self.llm_config.get("prompt_file", "prompts/product_filter.txt")
+        prompt_file = self.llm_config.get("prompt_file", "prompts/final_ranking.txt")
         prompt_file_path = prompt_dir.parent / "config" / prompt_file
-
         with open(prompt_file_path, "r") as f:
             self.prompt_template = f.read()
 
-        model_name = self.llm_config.get("model", "gemini-1.5-flash")
-        self.model = genai.GenerativeModel(model_name)
-        logger.info(f"FilterService initialized. Model: {model_name}")
+        self.model_name = self.llm_config.get("model", "google/gemini-flash-1.5-pro-latest")
 
-        # Prepare generation config
-        self.generation_config = genai.types.GenerationConfig(
-            temperature=self.llm_config.get("temperature", 0.7)
+        # Use AsyncOpenAI client
+        self.client = AsyncOpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=settings.OPENROUTER_API_KEY,
         )
+        logger.info(f"FilterService initialized with AsyncOpenAI for final ranking. Model: {self.model_name}")
 
-    async def filter_products_with_llm(self, products: List[Dict[str, Any]], search_query: str, identified_product: str, product_description: Optional[str]) -> Tuple[List[str], int, int, str]:
-        """
-        Uses an LLM to filter a list of products based on a search query and identified product.
-        Returns a tuple containing the list of 'random_key's, prompt tokens, response tokens, and the model name used.
-        """
-        model_name = self.llm_config.get("model", "gemini-1.5-flash")
+    async def _image_to_base64(self, image_path: Path) -> str:
+        async with aiofiles.open(image_path, "rb") as f:
+            binary_data = await f.read()
+            return base64.b64encode(binary_data).decode('utf-8')
+
+    async def _download_and_encode_image(self, url: str) -> Optional[str]:
+        """Downloads an image from a URL and returns it as a base64 string."""
         try:
-            prompt_tokens = 0
-            response_tokens = 0
-            if not products:
-                return [], prompt_tokens, response_tokens, model_name
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=30)
+                response.raise_for_status()
+                return base64.b64encode(response.content).decode('utf-8')
+        except Exception as e:
+            logger.error(f"Failed to download or encode image from {url}: {e}", exc_info=True)
+            return None
 
-            product_list_for_prompt = []
-            for p in products:
-                product_data = {
-                    "name": p.get("name"),
-                    "random_key": p.get("random_key"),
-                    "source": p.get("source", "unknown")
-                }
-                if "rank" in p:
-                    product_data["rank"] = p["rank"]
-                product_list_for_prompt.append(product_data)
-            product_list_json = json.dumps(product_list_for_prompt, indent=2, ensure_ascii=False)
+    async def rank_products_with_llm(
+        self,
+        products: List[Dict[str, Any]],
+        ground_truth_frame_paths: List[Path],
+        identified_product: str
+    ) -> Tuple[List[str], int, int, str]:
+        try:
+            prompt_text = self.prompt_template.format(identified_product=identified_product)
 
-            prompt = self.prompt_template.format(
-                search_query=search_query,
-                identified_product=identified_product,
-                product_description=product_description or identified_product,
-                product_list_json=product_list_json
+            content = [{"type": "text", "text": prompt_text}]
+            for frame_path in ground_truth_frame_paths:
+                base64_image = await self._image_to_base64(frame_path)
+                content.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{base64_image}"}
+                })
+
+            content.append({"type": "text", "text": "\n--- PRODUCT LIST TO RANK ---\nHere are the candidate products. Please rank them based on their visual similarity to the product in the reference images."})
+
+            image_urls = [p.get("image_url") for p in products if p.get("image_url")]
+            image_coroutines = [self._download_and_encode_image(url) for url in image_urls]
+            base64_images = await asyncio.gather(*image_coroutines)
+            url_to_base64_map = dict(zip(image_urls, base64_images))
+
+            for i, product in enumerate(products):
+                product_info = (
+                    f"\n\nProduct {i+1}:\n"
+                    f"Name: {product.get('name')}\n"
+                    f"Random Key: {product.get('random_key')}"
+                )
+                content.append({"type": "text", "text": product_info})
+                image_url = product.get("image_url")
+                if image_url and url_to_base64_map.get(image_url):
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{url_to_base64_map[image_url]}"}
+                    })
+                else:
+                    content.append({"type": "text", "text": "Image not available."})
+
+            messages = [{"role": "user", "content": content}]
+
+            logger.info(f"Sending async request to OpenRouter for final ranking with {len(products)} products.")
+            completion = await self.client.chat.completions.create(
+                model=self.model_name,
+                messages=messages,
+                extra_headers={
+                    "HTTP-Referer": "https://instarob.ai",
+                    "X-Title": "Instarob AI",
+                },
+                response_format={"type": "json_object"},
             )
 
-            # Calculate prompt tokens
-            prompt_token_count_result = await self.model.count_tokens_async(prompt)
-            prompt_tokens = prompt_token_count_result.total_tokens
-            logger.info(f"Filter prompt token count: {prompt_tokens}")
+            response_text = completion.choices[0].message.content.strip()
+            logger.info(f"Raw OpenRouter Final Ranking Response: {response_text}")
 
-            logger.info(f"Sending request to LLM to filter products for query: '{search_query}'")
-            response = await self.model.generate_content_async(prompt, generation_config=self.generation_config)
-
-            # Check for blocked responses or missing content
-            if not response.parts:
-                logger.error(f"LLM filter response was blocked or empty. Feedback: {response.prompt_feedback}")
-                return [], prompt_tokens, response_tokens, model_name
-
-            # Log raw response for debugging
-            response_text = response.text.strip()
-            logger.info(f"Raw LLM filter response: {response_text}")
-
-            # Calculate response tokens
-            response_token_count_result = await self.model.count_tokens_async(response_text)
-            response_tokens = response_token_count_result.total_tokens
-            logger.info(f"Filter response token count: {response_tokens}")
-
-            # Clean and parse the JSON object
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-
-            logger.info("Parsing JSON object response from LLM filter.")
             parsed_json = json.loads(response_text)
+            ranked_keys = parsed_json.get("ranked_keys", [])
 
-            filtered_keys = parsed_json.get("relevant_keys", [])
+            prompt_tokens = completion.usage.prompt_tokens
+            completion_tokens = completion.usage.completion_tokens
 
-            if isinstance(filtered_keys, list) and all(isinstance(k, str) for k in filtered_keys):
-                logger.info(f"LLM filtered down to {len(filtered_keys)} relevant products.")
-                return filtered_keys, prompt_tokens, response_tokens, model_name
+            if isinstance(ranked_keys, list) and all(isinstance(k, str) for k in ranked_keys):
+                logger.info(f"OpenRouter ranked {len(ranked_keys)} products.")
+                return ranked_keys, prompt_tokens, completion_tokens, self.model_name
             else:
-                logger.warning(f"LLM response key 'relevant_keys' was not a list of strings: {filtered_keys}")
-                return [], prompt_tokens, response_tokens, model_name
+                logger.warning(f"OpenRouter response key 'ranked_keys' was not a list of strings: {ranked_keys}")
+                return [], prompt_tokens, completion_tokens, self.model_name
 
-        except json.JSONDecodeError as e:
-            logger.error(f"JSON parsing failed for LLM filter response: {e}", exc_info=True)
-            return [], prompt_tokens, response_tokens, model_name
         except Exception as e:
-            logger.error(f"An error occurred during LLM product filtering: {e}", exc_info=True)
-            return [], prompt_tokens, response_tokens, model_name
+            logger.error(f"An error occurred during OpenRouter final ranking: {e}", exc_info=True)
+            return [], 0, 0, self.model_name
 
 filter_service = FilterService()
