@@ -18,6 +18,8 @@ from app.models.reel_in import ReelIn
 from app.models.frame_analysis import FrameAnalysis
 from app.services.product_service import product_service
 from app.services.filter_service import filter_service
+from app.services.cost_service import cost_service
+from app.services.openrouter_service import openrouter_service
 
 logger = get_logger()
 
@@ -42,6 +44,11 @@ class ReelsService:
         self.frames_dir.mkdir(parents=True, exist_ok=True)
 
         logger.info(f"ReelsService initialized. Model: {self.llm_config.get('model')}")
+
+        # Prepare generation config
+        self.generation_config = genai.types.GenerationConfig(
+            temperature=self.llm_config.get("temperature", 0.7)
+        )
 
     async def _download_video(self, url: str, request_id: str) -> Path:
         """Asynchronously downloads a video from a URL to a temporary local file."""
@@ -104,12 +111,26 @@ class ReelsService:
 
         cap.release()
 
+    def _get_frame_paths(self, request_id: str, analysis_result: FrameAnalysis) -> List[Path]:
+        """Returns a list of paths to the saved frames for a given request."""
+        frame_paths = []
+        request_frame_dir = self.frames_dir / request_id
+        sanitized_product_name = "".join(c for c in analysis_result.identified_product if c.isalnum() or c in ('_', '-')).rstrip()
+        for frame_info in analysis_result.best_frames:
+            frame_filename = f"{sanitized_product_name}_{frame_info.rank}.jpg"
+            frame_path = request_frame_dir / frame_filename
+            if frame_path.exists():
+                frame_paths.append(frame_path)
+        return frame_paths
+
     async def analyze_reel_video(self, reel_in: ReelIn) -> FrameAnalysis:
         """
         Orchestrates the main workflow: download, analyze with Gemini, and parse.
         """
         video_path = None
         video_file = None
+        request_start_time = time.time()
+        total_cost = 0.0
         try:
             # 1. Download the video
             video_path = await self._download_video(str(reel_in.reel_url), reel_in.request_id)
@@ -138,18 +159,31 @@ class ReelsService:
             model_name = self.llm_config.get("model", "gemini-1.5-flash")
             model = genai.GenerativeModel(model_name)
 
+            # Create the full prompt including the caption
+            full_prompt = f"{self.prompt}\n\nVideo Caption: {reel_in.caption}"
+
             # Log token usage for the prompt
-            prompt_token_count_result = await model.count_tokens_async([self.prompt, video_file])
+            prompt_token_count_result = await model.count_tokens_async([full_prompt, video_file])
             prompt_token_count = prompt_token_count_result.total_tokens
             logger.info(f"Prompt token count: {prompt_token_count}")
 
             logger.info(f"Sending request to Gemini model '{model_name}'...")
-            response = await model.generate_content_async([self.prompt, video_file])
+            response = await model.generate_content_async(
+                [full_prompt, video_file],
+                generation_config=self.generation_config
+            )
 
             # Log token usage for the response
             response_token_count_result = await model.count_tokens_async(response.text)
             response_token_count = response_token_count_result.total_tokens
             logger.info(f"Response token count: {response_token_count}")
+
+            # Calculate cost for the first LLM call
+            total_cost += cost_service.calculate_cost(
+                model_name=model_name,
+                prompt_tokens=prompt_token_count,
+                response_tokens=response_token_count
+            )
 
             # 3. Parse the response
             response_text = response.text.strip()
@@ -200,11 +234,13 @@ class ReelsService:
                 all_searched_urls = []
 
                 for result in search_results:
-                    if result:
-                        if result.get("products"):
-                            all_products.extend(result["products"])
-                        if result.get("searched_image_url"):
-                            all_searched_urls.append(result["searched_image_url"])
+                    if result and result.get("products"):
+                        searched_url = result.get("searched_image_url")
+                        for p in result["products"]:
+                            p["image_url"] = searched_url  # Add image_url to each product from image search
+                        all_products.extend(result["products"])
+                        if searched_url:
+                            all_searched_urls.append(searched_url)
 
                 analysis_result.product_info = all_products
                 analysis_result.searched_image_urls = all_searched_urls
@@ -215,6 +251,25 @@ class ReelsService:
 
                     # Search Torob by text
                     text_search_results = await product_service.search_on_torob_by_text(analysis_result.search_query_persian)
+
+                    if text_search_results:
+                        frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
+
+                        # Filter text search results with OpenRouter
+                        relevant_text_keys, or_prompt_tokens, or_completion_tokens = await openrouter_service.filter_text_search_results(
+                            products=text_search_results,
+                            frame_paths=frame_paths,
+                            identified_product=analysis_result.identified_product
+                        )
+                        text_search_results = [p for p in text_search_results if p['random_key'] in relevant_text_keys]
+                        logger.info(f"OpenRouter filtered text search results to {len(text_search_results)} products.")
+
+                        # Calculate cost for the OpenRouter call
+                        total_cost += cost_service.calculate_cost(
+                            model_name=openrouter_service.model_name,
+                            prompt_tokens=or_prompt_tokens,
+                            response_tokens=or_completion_tokens
+                        )
 
                     # Combine and deduplicate image and text search results
                     combined_products = {}
@@ -235,11 +290,18 @@ class ReelsService:
                     logger.info(f"Combined list of {len(product_list_to_filter)} unique products (tagged by source) will be sent to LLM for filtering.")
 
                     
-                    relevant_keys, filter_prompt_tokens, filter_response_tokens = await filter_service.filter_products_with_llm(
+                    relevant_keys, filter_prompt_tokens, filter_response_tokens, filter_model_name = await filter_service.filter_products_with_llm(
                         products=product_list_to_filter,
                         search_query=analysis_result.search_query_persian,
                         identified_product=analysis_result.identified_product,
                         product_description=analysis_result.product_description
+                    )
+
+                    # Calculate cost for the filter LLM call
+                    total_cost += cost_service.calculate_cost(
+                        model_name=filter_model_name,
+                        prompt_tokens=filter_prompt_tokens,
+                        response_tokens=filter_response_tokens
                     )
 
                     # Aggregate token counts
@@ -248,8 +310,33 @@ class ReelsService:
                     logger.info(f"Aggregated token counts. Total Prompt: {analysis_result.prompt_token_count}, Total Response: {analysis_result.response_token_count}")
 
                     filtered_products = [p for p in product_list_to_filter if p['random_key'] in relevant_keys]
-                    analysis_result.product_info = filtered_products
-                    logger.info(f"Filtering complete. Final product count: {len(filtered_products)}")
+
+                    if filtered_products:
+                        logger.info(f"Initial filtering complete. Sending {len(filtered_products)} products for final ranking.")
+                        frame_paths = self._get_frame_paths(reel_in.request_id, analysis_result)
+
+                        ranked_keys, rank_prompt_tokens, rank_completion_tokens, rank_model_name = await openrouter_service.rank_and_filter_final_list(
+                            products=filtered_products,
+                            frame_paths=frame_paths,
+                            identified_product=analysis_result.identified_product
+                        )
+
+                        # Calculate cost for the final ranking call
+                        total_cost += cost_service.calculate_cost(
+                            model_name=rank_model_name,
+                            prompt_tokens=rank_prompt_tokens,
+                            response_tokens=rank_completion_tokens
+                        )
+
+                        # Create a map for quick lookups and preserve order from ranking
+                        product_map = {p['random_key']: p for p in filtered_products}
+                        final_ranked_products = [product_map[key] for key in ranked_keys if key in product_map]
+
+                        analysis_result.product_info = final_ranked_products
+                        logger.info(f"Final ranking complete. Final product count: {len(final_ranked_products)}")
+                    else:
+                        analysis_result.product_info = []
+                        logger.info("No products left after initial filtering to send for final ranking.")
 
                 else:
                     logger.info("No Persian search query provided. Skipping text search and filtering.")
@@ -273,6 +360,9 @@ class ReelsService:
             if video_file:
                 logger.info(f"Deleting uploaded file '{video_file.display_name}' from Gemini in a separate thread.")
                 await asyncio.to_thread(genai.delete_file, video_file.name)
+
+            request_duration = time.time() - request_start_time
+            logger.info(f"Request finished. Total duration: {request_duration:.2f}s, Total LLM cost: ${total_cost:.6f}")
 
     def zip_frames(self, request_ids: List[str], zip_filename: str) -> Path:
         """Zips the frames for a given list of request IDs."""

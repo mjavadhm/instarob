@@ -1,4 +1,16 @@
 product_search:
-  model: gemini-2.5-flash
+  model: gemini-2.5-flash-lite
   prompt_file: "prompts/product_search.txt"
   temperature: 0.3
+
+product_filter:
+  model: gemini-2.5-flash-lite 
+  prompt_file: "prompts/product_filter.txt"
+
+text_result_filter_openrouter:
+  model: "google/gemini-2.5-flash-lite-preview-09-2025"
+  prompt_file: "prompts/text_result_filter.txt"
+
+final_ranking_openrouter:
+  model: "google/gemini-2.5-flash-lite-preview-09-2025"
+  prompt_file: "prompts/final_ranking.txt"

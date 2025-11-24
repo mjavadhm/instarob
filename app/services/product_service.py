@@ -121,9 +121,10 @@ class ProductService:
                         {
                             "name": result.get("name1"),
                             "link": f"https://torob.com{result.get('web_client_absolute_url')}",
-                            "random_key": result.get("random_key")
+                            "random_key": result.get("random_key"),
+                            "rank": i + 1  # Add rank based on position
                         }
-                        for result in all_results
+                        for i, result in enumerate(all_results)
                     ]
                     logger.info(f"Successfully found {len(products_info)} products on Torob.")
 
@@ -143,7 +144,7 @@ class ProductService:
             return None
 
     async def search_on_torob_by_text(self, query: str) -> Optional[List[Dict[str, Any]]]:
-        """Searches Torob by a text query and returns up to 15 non-advertisement products."""
+        """Searches Torob by a text query and returns up to 10 non-advertisement products, including their image URLs."""
         search_url = f"https://api.torob.com/v4/base-product/search/?q={query}&size=100&page=1"
         transport = AsyncProxyTransport.from_url("socks5://127.0.0.1:2444")
 
@@ -166,9 +167,10 @@ class ProductService:
                         products_info.append({
                             "name": result.get("name1"),
                             "link": f"https://torob.com{result.get('web_client_absolute_url')}",
-                            "random_key": result.get("random_key")
+                            "random_key": result.get("random_key"),
+                            "image_url": result.get("image_url")
                         })
-                        if len(products_info) >= 15:
+                        if len(products_info) >= 10:
                             break
 
                 logger.info(f"Found {len(products_info)} non-advertisement products from text search.")
