@@ -44,7 +44,7 @@ class EdenAIService:
 
         async with httpx.AsyncClient() as client:
             try:
-                response = await client.post(self.api_url, json=payload, headers=headers, timeout=120)
+                response = await client.post(self.api_url, json=payload, headers=headers, timeout=35)
                 response.raise_for_status()
                 # print(str(response.text))
                 return response.json()

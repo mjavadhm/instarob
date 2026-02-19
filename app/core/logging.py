@@ -6,12 +6,23 @@ request_id_var = ContextVar("request_id", default="[no-request-id]")
 
 def setup_logging():
     logger.remove()
+    # Console sink
     logger.add(
         sys.stdout,
         format="<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                "<level>{level: <8}</level> | "
                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> | "
                "<yellow>rid:{extra[request_id]}</yellow> - <level>{message}</level>",
+        enqueue=True,
+        backtrace=True,
+        level="INFO",
+    )
+    # File sink
+    logger.add(
+        "uvicorn.log",
+        rotation="10 MB",
+        retention="10 days",
+        format="{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {name}:{function}:{line} | rid:{extra[request_id]} - {message}",
         enqueue=True,
         backtrace=True,
         level="INFO",

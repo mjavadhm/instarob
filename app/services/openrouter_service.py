@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.core.config import settings
 from app.core.logging import get_logger
+from app.core.utils import async_retry
 from app.models.caption_analysis import CaptionAnalysis
 
 logger = get_logger()
@@ -46,6 +47,7 @@ class OpenRouterService:
             binary_data = await f.read()
             return base64.b64encode(binary_data).decode('utf-8')
 
+    @async_retry()
     async def analyze_caption_for_search_query(self, caption: str) -> Tuple[Optional[CaptionAnalysis], int, int]:
         try:
             prompt = self.caption_analysis_prompt_template.format(caption=caption)
@@ -78,10 +80,8 @@ class OpenRouterService:
         except (json.JSONDecodeError, ValidationError) as e:
             logger.error(f"Failed to parse or validate OpenRouter response for caption analysis: {e}", exc_info=True)
             return None, 0, 0
-        except Exception as e:
-            logger.error(f"An error occurred during OpenRouter caption analysis: {e}", exc_info=True)
-            return None, 0, 0
 
+    @async_retry()
     async def filter_text_search_results(
         self,
         products: List[Dict[str, Any]],
@@ -128,7 +128,7 @@ class OpenRouterService:
                 response_format={"type": "json_object"},
             )
 
-            response_text = completion.choices[0].message.content.strip()
+            response_text = completion.choices[0].message.content.strip().removeprefix("```json").removesuffix("```").strip()
             logger.info(f"Raw OpenRouter Response (Text Filter): {response_text}")
 
             parsed_json = json.loads(response_text)
@@ -144,8 +144,8 @@ class OpenRouterService:
                 logger.warning(f"OpenRouter response key 'relevant_keys' was not a list of strings: {relevant_keys}")
                 return [], prompt_tokens, completion_tokens
 
-        except Exception as e:
-            logger.error(f"An error occurred during OpenRouter text filtering: {e}", exc_info=True)
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Failed to parse or validate OpenRouter response for text filtering: {e}", exc_info=True)
             return [], 0, 0
 
 openrouter_service = OpenRouterService()
